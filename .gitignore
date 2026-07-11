@@ -26,6 +26,16 @@ render.experimental.xml
 # Keystore files
 *.jks
 *.keystore
+*.pem
+*.p12
+*.pk8
+adbkey
+adbkey.pub
+
+# Sensitive device/test artifacts
+adb_identity/
+device-logs/
+real-device-data/
 
 # Google Services (e.g. APIs or Firebase)
 google-services.json
