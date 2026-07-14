@@ -29,6 +29,9 @@ render.experimental.xml
 *.pem
 *.p12
 *.pk8
+*.key
+*.der
+*.crt
 adbkey
 adbkey.pub
 
@@ -36,6 +39,13 @@ adbkey.pub
 adb_identity/
 device-logs/
 real-device-data/
+pairing-material/
+exported-logcat/
+
+# Local secrets and signing environment
+.env
+.env.*
+keystore.properties
 
 # Google Services (e.g. APIs or Firebase)
 google-services.json
