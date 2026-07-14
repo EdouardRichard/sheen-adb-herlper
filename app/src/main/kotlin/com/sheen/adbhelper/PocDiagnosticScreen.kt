@@ -32,6 +32,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.sheen.adb.core.AdbConnectionState
+import com.sheen.adb.core.AdbDiagnosticEvent
+import com.sheen.adb.core.AdbDiagnosticOutcome
 import com.sheen.adb.core.DisconnectionReason
 
 @Composable
@@ -63,7 +65,9 @@ fun PocDiagnosticScreen(viewModel: PocViewModel) {
             onValueChange = viewModel::updateEndpoint,
             modifier = Modifier.fillMaxWidth(),
             label = { Text("调试地址 IP:端口") },
-            supportingText = { Text("支持 IPv4、hostname 和 [IPv6]:端口") },
+            supportingText = {
+                Text("Android 11+ 请填写“无线调试”主页面的动态调试端口；5555 仅用于已启用的旧式 ADB TCP/IP")
+            },
             singleLine = true,
             isError = uiState.inputError != null,
         )
@@ -75,6 +79,10 @@ fun PocDiagnosticScreen(viewModel: PocViewModel) {
             }
             OutlinedButton(onClick = viewModel::prefillLocalhost) { Text("本机 127.0.0.1") }
         }
+        Text(
+            "Android 11+ 首次配对：先连接无线调试主页面的动态调试端口；出现 ADB_AUTH_FAILED 后再点“使用配对码”。",
+            style = MaterialTheme.typography.bodySmall,
+        )
 
         if (uiState.connectionState.isBusy()) {
             OutlinedButton(onClick = viewModel::cancelCurrentOperation) { Text("取消当前操作") }
@@ -110,6 +118,14 @@ fun PocDiagnosticScreen(viewModel: PocViewModel) {
 
         if (error != null) {
             ErrorCard(error) { details -> copySanitizedDetails(context, details) }
+        }
+
+        OutlinedButton(onClick = viewModel::toggleDiagnostics) {
+            Text(if (uiState.showDiagnostics) "收起诊断日志" else "查看诊断日志（${uiState.diagnosticEvents.size}）")
+        }
+
+        if (uiState.showDiagnostics) {
+            DiagnosticLogCard(uiState.diagnosticEvents, viewModel::clearDiagnostics)
         }
     }
 }
@@ -174,6 +190,36 @@ private fun ErrorCard(error: AdbConnectionState.Error, onCopy: (String) -> Unit)
             OutlinedButton(onClick = { onCopy(error.technicalDetails) }) { Text("复制脱敏技术详情") }
         }
     }
+}
+
+@Composable
+private fun DiagnosticLogCard(events: List<AdbDiagnosticEvent>, onClear: () -> Unit) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("PoC 脱敏诊断日志", style = MaterialTheme.typography.titleMedium)
+            Text("仅保留当前进程最近 100 条事件；不包含真实地址、配对码、命令、Shell 输出或设备 Logcat。")
+            if (events.isEmpty()) {
+                Text("暂无诊断事件")
+            } else {
+                events.forEach { event ->
+                    Text(event.displayText(), style = MaterialTheme.typography.bodySmall)
+                }
+                OutlinedButton(onClick = onClear) { Text("清空诊断日志") }
+            }
+        }
+    }
+}
+
+private fun AdbDiagnosticEvent.displayText(): String {
+    val outcomeText = when (outcome) {
+        AdbDiagnosticOutcome.STARTED -> "开始"
+        AdbDiagnosticOutcome.SUCCEEDED -> "成功"
+        AdbDiagnosticOutcome.CANCELLED -> "已取消"
+        AdbDiagnosticOutcome.FAILED -> "失败"
+        AdbDiagnosticOutcome.RESOURCE_CLOSED -> "资源已关闭"
+    }
+    val cause = causeType?.let { "; type=$it" }.orEmpty()
+    return "#$sequence $stage · $outcomeText · $technicalCode · $redactedTarget$cause"
 }
 
 private fun AdbConnectionState.canStartConnection() =

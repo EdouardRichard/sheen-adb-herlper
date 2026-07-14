@@ -6,6 +6,7 @@ import kotlin.time.Duration.Companion.seconds
 
 interface AdbSessionManager : AutoCloseable {
     val connectionState: StateFlow<AdbConnectionState>
+    val diagnosticEvents: StateFlow<List<AdbDiagnosticEvent>>
 
     suspend fun connect(
         endpoint: AdbEndpoint,
@@ -24,6 +25,8 @@ interface AdbSessionManager : AutoCloseable {
     ): AdbOperationResult<ShellResult>
 
     suspend fun disconnect(timeout: Duration = 5.seconds): AdbOperationResult<Unit>
+
+    fun clearDiagnosticEvents()
 
     override fun close()
 }

@@ -3,6 +3,7 @@ package com.sheen.adbhelper
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sheen.adb.core.AdbConnectionState
+import com.sheen.adb.core.AdbDiagnosticEvent
 import com.sheen.adb.core.AdbEndpointParser
 import com.sheen.adb.core.AdbOperationResult
 import com.sheen.adb.core.AdbSessionManager
@@ -21,9 +22,11 @@ data class PocUiState(
     val pairingEndpointInput: String = "",
     val pairingCode: String = "",
     val showPairing: Boolean = false,
+    val showDiagnostics: Boolean = false,
     val inputError: String? = null,
     val connectionState: AdbConnectionState = AdbConnectionState.Disconnected(),
     val pocResult: ShellResult? = null,
+    val diagnosticEvents: List<AdbDiagnosticEvent> = emptyList(),
 )
 
 class PocViewModel(private val manager: AdbSessionManager) : ViewModel() {
@@ -35,6 +38,11 @@ class PocViewModel(private val manager: AdbSessionManager) : ViewModel() {
         viewModelScope.launch {
             manager.connectionState.collect { state ->
                 mutableUiState.update { it.copy(connectionState = state) }
+            }
+        }
+        viewModelScope.launch {
+            manager.diagnosticEvents.collect { events ->
+                mutableUiState.update { it.copy(diagnosticEvents = events) }
             }
         }
     }
@@ -76,6 +84,12 @@ class PocViewModel(private val manager: AdbSessionManager) : ViewModel() {
     fun closePairing() = mutableUiState.update {
         it.copy(showPairing = false, pairingCode = "", inputError = null)
     }
+
+    fun toggleDiagnostics() = mutableUiState.update {
+        it.copy(showDiagnostics = !it.showDiagnostics)
+    }
+
+    fun clearDiagnostics() = manager.clearDiagnosticEvents()
 
     fun updatePairingEndpoint(value: String) = mutableUiState.update {
         it.copy(pairingEndpointInput = value, inputError = null)

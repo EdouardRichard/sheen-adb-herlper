@@ -15,9 +15,8 @@ internal object AdbExceptionMapper {
         val causes = generateSequence(error) { it.cause }.take(8).toList()
         return when {
             causes.any { it is SocketTimeoutException } -> AdbError.Timeout(stage)
-            causes.any { it is UnknownHostException || it is NoRouteToHostException } ->
+            causes.any { it is UnknownHostException || it is NoRouteToHostException || it is ConnectException } ->
                 AdbError.NetworkUnreachable(stage)
-            causes.any { it is ConnectException } -> AdbError.DeviceRejected(stage)
             causes.any { it is SSLException || it.javaClass.simpleName.contains("Auth", ignoreCase = true) } ->
                 AdbError.AuthenticationFailed(stage)
             causes.any { it is EOFException || it.javaClass.simpleName.contains("StreamClosed") } ->

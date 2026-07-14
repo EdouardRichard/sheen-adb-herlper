@@ -11,6 +11,23 @@ enum class AdbOperationStage {
     DISCONNECT,
 }
 
+enum class AdbDiagnosticOutcome {
+    STARTED,
+    SUCCEEDED,
+    CANCELLED,
+    FAILED,
+    RESOURCE_CLOSED,
+}
+
+data class AdbDiagnosticEvent(
+    val sequence: Long,
+    val stage: AdbOperationStage,
+    val outcome: AdbDiagnosticOutcome,
+    val technicalCode: String,
+    val redactedTarget: String,
+    val causeType: String? = null,
+)
+
 sealed interface AdbError {
     val stage: AdbOperationStage
     val userMessage: String
@@ -26,7 +43,8 @@ sealed interface AdbError {
 
     data class NetworkUnreachable(override val stage: AdbOperationStage) : AdbError {
         override val userMessage = "目标网络或端口不可达。"
-        override val nextStep = "确认两台设备在同一局域网、无线调试仍开启，并核对当前端口。"
+        override val nextStep =
+            "确认两台设备在同一局域网、无线调试仍开启，并使用无线调试主页面显示的调试端口；Android 11+ 请勿默认填写 5555。"
         override val technicalCode = "ADB_NETWORK_UNREACHABLE"
     }
 

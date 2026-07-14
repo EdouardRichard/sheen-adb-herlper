@@ -1,6 +1,7 @@
 package com.sheen.adb.core.internal
 
 import com.sheen.adb.core.AdbConnectionState
+import com.sheen.adb.core.AdbDiagnosticOutcome
 import com.sheen.adb.core.AdbEndpoint
 import com.sheen.adb.core.AdbOperationResult
 import java.util.concurrent.atomic.AtomicBoolean
@@ -67,6 +68,28 @@ class DefaultAdbSessionManagerTest {
         assertTrue(cancelClient.closed.get())
         val cancelledState = cancelManager.connectionState.value as AdbConnectionState.Disconnected
         assertEquals(com.sheen.adb.core.DisconnectionReason.CONNECT_CANCELLED, cancelledState.reason)
+    }
+
+    @Test
+    fun `diagnostics are bounded cleared and never contain endpoint or command output`() = runBlocking {
+        val client = FakeClient()
+        val manager = DefaultAdbSessionManager(FakeFactory(client), Dispatchers.IO)
+        val endpoint = AdbEndpoint("sensitive-device.local", 40123)
+
+        manager.connect(endpoint)
+        manager.executeShell("secret-command")
+        repeat(60) { manager.disconnect() }
+
+        val events = manager.diagnosticEvents.value
+        assertEquals(100, events.size)
+        assertTrue(events.any { it.outcome == AdbDiagnosticOutcome.SUCCEEDED })
+        val rendered = events.joinToString()
+        assertTrue("sensitive-device.local" !in rendered)
+        assertTrue("secret-command" !in rendered)
+        assertTrue("ok" !in rendered)
+
+        manager.clearDiagnosticEvents()
+        assertTrue(manager.diagnosticEvents.value.isEmpty())
     }
 
     private class FakeClient(private val block: Boolean = false) : AdbProtocolClient {
