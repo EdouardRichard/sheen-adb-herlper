@@ -20,3 +20,11 @@ dependencyResolutionManagement {
 rootProject.name = "SheenAdbHelper"
 include(":app")
 include(":core:adb")
+include(":core:data")
+include(":core:ui")
+include(":feature:devices")
+include(":feature:overview")
+include(":feature:shell")
+include(":feature:processes")
+include(":feature:logcat")
+include(":feature:settings")

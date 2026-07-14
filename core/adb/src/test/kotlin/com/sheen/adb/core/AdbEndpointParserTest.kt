@@ -7,7 +7,7 @@ import org.testng.annotations.Test
 class AdbEndpointParserTest {
     @Test
     fun `parses IPv4 hostname and bracketed IPv6`() {
-        assertEndpoint("192.168.1.20:5555", "192.168.1.20", 5555)
+        assertEndpoint("192.0.2.20:5555", "192.0.2.20", 5555)
         assertEndpoint("device.local:37001", "device.local", 37001)
         assertEndpoint("[fe80::1%wlan0]:42123", "fe80::1%wlan0", 42123)
     }
@@ -15,7 +15,7 @@ class AdbEndpointParserTest {
     @Test
     fun `rejects ambiguous or out of range endpoints`() {
         assertTrue(AdbEndpointParser.parse("fe80::1:5555") is EndpointParseResult.Invalid)
-        assertTrue(AdbEndpointParser.parse("192.168.1.2:0") is EndpointParseResult.Invalid)
+        assertTrue(AdbEndpointParser.parse("192.0.2.2:0") is EndpointParseResult.Invalid)
         assertTrue(AdbEndpointParser.parse("999.168.1.2:5555") is EndpointParseResult.Invalid)
         assertTrue(AdbEndpointParser.parse("device.local") is EndpointParseResult.Invalid)
     }

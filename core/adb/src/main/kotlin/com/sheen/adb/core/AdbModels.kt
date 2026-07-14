@@ -8,6 +8,9 @@ enum class AdbOperationStage {
     AUTHENTICATE,
     PAIR,
     SHELL,
+    OVERVIEW,
+    PROCESSES,
+    LOGCAT,
     DISCONNECT,
 }
 
@@ -117,4 +120,70 @@ data class ShellResult(
     val stderr: String,
     val exitCode: Int,
     val elapsed: Duration,
+    val outputMode: ShellOutputMode = ShellOutputMode.SEPARATED,
+    val wasTruncated: Boolean = false,
 )
+
+enum class ShellOutputMode { SEPARATED, MERGED }
+
+data class DeviceOverview(
+    val brand: String? = null,
+    val manufacturer: String? = null,
+    val model: String? = null,
+    val deviceCode: String? = null,
+    val androidVersion: String? = null,
+    val sdk: String? = null,
+    val buildDisplay: String? = null,
+    val buildFingerprint: String? = null,
+    val securityPatch: String? = null,
+    val cpuAbi: String? = null,
+    val availableCores: Int? = null,
+    val memoryTotalBytes: Long? = null,
+    val memoryAvailableBytes: Long? = null,
+    val storageTotalBytes: Long? = null,
+    val storageAvailableBytes: Long? = null,
+    val batteryPercent: Int? = null,
+    val chargingState: String? = null,
+    val temperatureCelsius: Double? = null,
+    val uptimeSeconds: Long? = null,
+    val networkAddresses: List<String> = emptyList(),
+)
+
+data class DynamicDeviceMetrics(
+    val memoryTotalBytes: Long? = null,
+    val memoryAvailableBytes: Long? = null,
+    val batteryPercent: Int? = null,
+    val chargingState: String? = null,
+    val temperatureCelsius: Double? = null,
+    val uptimeSeconds: Long? = null,
+)
+
+data class DeviceProcess(
+    val name: String,
+    val pid: Int,
+    val uid: String? = null,
+    val state: String? = null,
+    val residentMemoryBytes: Long? = null,
+)
+
+data class ProcessSnapshot(
+    val processes: List<DeviceProcess>,
+    val degradedReason: String? = null,
+)
+
+enum class LogcatLevel(val argument: String) {
+    VERBOSE("V"), DEBUG("D"), INFO("I"), WARN("W"), ERROR("E"), FATAL("F")
+}
+
+enum class LogcatBuffer(val argument: String) {
+    MAIN("main"), SYSTEM("system"), CRASH("crash"), RADIO("radio"), EVENTS("events")
+}
+
+data class LogcatConfig(
+    val minimumLevel: LogcatLevel = LogcatLevel.INFO,
+    val buffers: Set<LogcatBuffer> = setOf(LogcatBuffer.MAIN, LogcatBuffer.SYSTEM, LogcatBuffer.CRASH),
+) {
+    init { require(buffers.isNotEmpty()) }
+}
+
+data class LogcatLine(val text: String, val fromStandardError: Boolean = false)

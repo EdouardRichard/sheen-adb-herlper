@@ -7,6 +7,8 @@ lifecycle = "2.10.0"
 coroutines = "1.10.2"
 kadb = "2.1.1"
 testng = "7.11.0"
+dataStore = "1.2.0"
+okio = "3.17.0"
 
 [libraries]
 androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "activityCompose" }
@@ -21,6 +23,8 @@ kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-c
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kadb = { module = "com.flyfishxu:kadb", version.ref = "kadb" }
 testng = { module = "org.testng:testng", version.ref = "testng" }
+androidx-datastore-preferences = { module = "androidx.datastore:datastore-preferences", version.ref = "dataStore" }
+okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

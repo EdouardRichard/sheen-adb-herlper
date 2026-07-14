@@ -12,17 +12,36 @@ android {
         minSdk = 30
         targetSdk = 36
         versionCode = 1
-        versionName = "0.0.1-poc"
+        versionName = "0.0.1"
     }
 
     buildFeatures {
         compose = true
-        buildConfig = false
+        buildConfig = true
+    }
+
+    buildTypes {
+        debug {
+            isDebuggable = true
+        }
+        release {
+            isDebuggable = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
+        }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests.all { it.useTestNG() }
     }
 
     packaging {
@@ -40,6 +59,14 @@ configurations.configureEach {
 
 dependencies {
     implementation(project(":core:adb"))
+    implementation(project(":core:data"))
+    implementation(project(":core:ui"))
+    implementation(project(":feature:devices"))
+    implementation(project(":feature:overview"))
+    implementation(project(":feature:shell"))
+    implementation(project(":feature:processes"))
+    implementation(project(":feature:logcat"))
+    implementation(project(":feature:settings"))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
@@ -50,4 +77,5 @@ dependencies {
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
     debugImplementation(libs.androidx.compose.ui.tooling)
+    testImplementation(libs.testng)
 }

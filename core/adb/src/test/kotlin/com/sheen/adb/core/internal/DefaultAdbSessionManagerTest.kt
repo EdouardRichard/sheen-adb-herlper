@@ -4,10 +4,12 @@ import com.sheen.adb.core.AdbConnectionState
 import com.sheen.adb.core.AdbDiagnosticOutcome
 import com.sheen.adb.core.AdbEndpoint
 import com.sheen.adb.core.AdbOperationResult
+import com.sheen.adb.core.LogcatConfig
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.collect
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertTrue
 import org.testng.annotations.Test
@@ -92,14 +94,51 @@ class DefaultAdbSessionManagerTest {
         assertTrue(manager.diagnosticEvents.value.isEmpty())
     }
 
-    private class FakeClient(private val block: Boolean = false) : AdbProtocolClient {
+    @Test
+    fun `pairing code and host identity are cleared`() = runBlocking {
+        val factory = FakeFactory(FakeClient())
+        val manager = DefaultAdbSessionManager(factory, Dispatchers.IO)
+        val code = charArrayOf('0', '1', '2', '3', '4', '5')
+
+        assertTrue(manager.pair(AdbEndpoint("pair.local", 40005), code) is AdbOperationResult.Success)
+        assertTrue(code.all { it == '\u0000' })
+        assertTrue(manager.clearHostIdentity() is AdbOperationResult.Success)
+        assertTrue(factory.identityCleared.get())
+    }
+
+    @Test
+    fun `cancelling logcat closes only its stream`() = runBlocking {
+        val stream = BlockingStream()
+        val client = FakeClient(stream = stream)
+        val manager = DefaultAdbSessionManager(FakeFactory(client), Dispatchers.IO)
+        manager.connect(AdbEndpoint("logcat.local", 40006))
+
+        val collection = async(Dispatchers.Default) { manager.streamLogcat(LogcatConfig()).collect() }
+        while (!stream.started.get()) Thread.yield()
+        collection.cancel()
+        collection.join()
+
+        assertTrue(stream.closed.get())
+        assertTrue(!client.closed.get())
+        assertTrue(manager.connectionState.value is AdbConnectionState.Connected)
+    }
+
+    private class FakeClient(
+        private val block: Boolean = false,
+        private val stream: ProtocolShellStream? = null,
+    ) : AdbProtocolClient {
         val closed = AtomicBoolean(false)
         val started = AtomicBoolean(false)
 
         override fun execute(command: String): ProtocolShellResponse {
             started.set(true)
             if (block) Thread.sleep(10_000)
-            return ProtocolShellResponse("ok\n", "", 0)
+            return ProtocolShellResponse("ok\n", "", 0, streamsSeparated = true, wasTruncated = false)
+        }
+
+        override fun openShellStream(command: String): ProtocolShellStream = stream ?: object : ProtocolShellStream {
+            override fun read(): ProtocolShellPacket = ProtocolShellPacket.Exit(0)
+            override fun close() = Unit
         }
 
         override fun close() {
@@ -107,14 +146,28 @@ class DefaultAdbSessionManagerTest {
         }
     }
 
+    private class BlockingStream : ProtocolShellStream {
+        val started = AtomicBoolean(false)
+        val closed = AtomicBoolean(false)
+        override fun read(): ProtocolShellPacket {
+            started.set(true)
+            Thread.sleep(10_000)
+            return ProtocolShellPacket.Exit(0)
+        }
+        override fun close() { closed.set(true) }
+    }
+
     private open class FakeFactory(private val client: AdbProtocolClient) : AdbProtocolClientFactory {
+        val identityCleared = AtomicBoolean(false)
         override fun open(endpoint: AdbEndpoint) = client
         override suspend fun pair(endpoint: AdbEndpoint, pairingCode: CharArray) = Unit
+        override fun clearIdentity() { identityCleared.set(true) }
     }
 
     private class QueueFactory(vararg clients: AdbProtocolClient) : AdbProtocolClientFactory {
         private val queue = ArrayDeque(clients.toList())
         override fun open(endpoint: AdbEndpoint): AdbProtocolClient = queue.removeFirst()
         override suspend fun pair(endpoint: AdbEndpoint, pairingCode: CharArray) = Unit
+        override fun clearIdentity() = Unit
     }
 }

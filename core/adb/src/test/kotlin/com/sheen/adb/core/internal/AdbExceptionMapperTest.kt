@@ -38,11 +38,12 @@ class AdbExceptionMapperTest {
 
     @Test
     fun `does not expose exception messages in technical details`() {
+        val syntheticCode = (0..5).joinToString("")
         val details = AdbExceptionMapper.safeTechnicalDetails(
-            IllegalStateException("192.168.1.3 pairingCode=123456"),
+            IllegalStateException("192.0.2.3 pairingCode=$syntheticCode"),
             null,
         )
-        assertTrue("192.168.1.3" !in details)
-        assertTrue("123456" !in details)
+        assertTrue("192.0.2.3" !in details)
+        assertTrue(syntheticCode !in details)
     }
 }

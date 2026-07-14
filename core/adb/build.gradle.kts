@@ -28,6 +28,7 @@ dependencies {
     api(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kadb)
+    implementation(libs.okio)
 
     testImplementation(libs.testng)
 }

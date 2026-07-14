@@ -1,0 +1,9 @@
+Sheen ADB Helper
+Copyright 2026 Sheen ADB Helper contributors
+
+This product includes software developed by the Android Open Source Project
+and AndroidX, licensed under the Apache License 2.0.
+
+This product includes Kadb and its transitive protocol and cryptography
+dependencies. Their licenses and source links are listed in
+docs/第三方依赖与许可证.md.
