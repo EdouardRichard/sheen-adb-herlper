@@ -185,25 +185,30 @@ class NsdDiscoveryAdapterTest {
     }
 
     @Test
-    fun `discovery failure releases every acquired legacy resource and notifies only a safe structured failure`() {
-        val fixture = fixture()
-        fixture.adapter.start(request(generation = 650L, apiLevel = 30))
-        val timeout = fixture.scheduler.scheduled.single().resource
-        val lock = fixture.platform.multicastLocks.single()
-        val pairingDiscovery = fixture.platform.discoveryFor(WirelessServiceType.PAIRING)
-        val connectDiscovery = fixture.platform.discoveryFor(WirelessServiceType.CONNECT)
+    fun `discovery failure after both pending resolves releases every acquired resource and notifies only a safe structured failure`() {
+        listOf(30, 33).forEach { apiLevel ->
+            val fixture = fixture()
+            fixture.adapter.start(
+                request(
+                    generation = 650L + apiLevel,
+                    apiLevel = apiLevel,
+                    network = if (apiLevel >= 33) NETWORK_GAMMA else null,
+                ),
+            )
+            val pending = fixture.openPendingResolves()
+            val timeout = fixture.scheduler.scheduled.single().resource
+            val lock = fixture.platform.multicastLocks.singleOrNull()
+            val networkChange = fixture.platform.networkChanges.singleOrNull()
 
-        pairingDiscovery.callbacks.onDiscoveryFailure(NsdPlatformFailure.DISCOVERY_FAILED)
-        pairingDiscovery.callbacks.onDiscoveryFailure(NsdPlatformFailure.DISCOVERY_FAILED)
+            pending.pairingDiscovery.callbacks.onDiscoveryFailure(NsdPlatformFailure.DISCOVERY_FAILED)
+            pending.pairingDiscovery.callbacks.onDiscoveryFailure(NsdPlatformFailure.DISCOVERY_FAILED)
 
-        assertExactlyOnce(pairingDiscovery.resource)
-        assertExactlyOnce(connectDiscovery.resource)
-        assertExactlyOnce(timeout)
-        assertExactlyOnce(lock)
-        assertEquals(fixture.failures, listOf(NsdDiscoveryFailure.PLATFORM_DISCOVERY_FAILED))
-        pairingDiscovery.callbacks.onServiceFound(PAIRING_SERVICE)
-        assertTrue(fixture.platform.resolves.isEmpty())
-        assertTrue(fixture.observedServices.isEmpty())
+            pending.assertAllReleased(timeout, multicastLock = lock, networkChange = networkChange)
+            if (apiLevel >= 33) assertTrue(fixture.platform.multicastLocks.isEmpty())
+            assertEquals(fixture.failures, listOf(NsdDiscoveryFailure.PLATFORM_DISCOVERY_FAILED))
+            pending.sendLateCallbacks()
+            assertTrue(fixture.observedServices.isEmpty())
+        }
     }
 
     @Test
@@ -224,6 +229,31 @@ class NsdDiscoveryAdapterTest {
     }
 
     @Test
+    fun `resolve gateway exception after another resolve is pending is contained cleans every acquired resource and reports only a safe failure`() {
+        val fixture = fixture()
+        fixture.adapter.start(request(generation = 665L, apiLevel = 30))
+        val timeout = fixture.scheduler.scheduled.single().resource
+        val lock = fixture.platform.multicastLocks.single()
+        val pairingDiscovery = fixture.platform.discoveryFor(WirelessServiceType.PAIRING)
+        val connectDiscovery = fixture.platform.discoveryFor(WirelessServiceType.CONNECT)
+        pairingDiscovery.callbacks.onServiceFound(PAIRING_SERVICE)
+        val pairingResolve = fixture.platform.resolves.single()
+        fixture.platform.throwOnResolveService = CONNECT_SERVICE
+
+        connectDiscovery.callbacks.onServiceFound(CONNECT_SERVICE)
+
+        assertEquals(fixture.platform.resolves.size, 1)
+        assertExactlyOnce(pairingDiscovery.resource)
+        assertExactlyOnce(connectDiscovery.resource)
+        assertExactlyOnce(pairingResolve.resource)
+        assertExactlyOnce(timeout)
+        assertExactlyOnce(lock)
+        assertEquals(fixture.failures, listOf(NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED))
+        pairingResolve.callbacks.onResolved(resolvedService(PAIRING_SERVICE, ADDRESSES))
+        assertTrue(fixture.observedServices.isEmpty())
+    }
+
+    @Test
     fun `gateway operation exception is mapped to a safe start rejection and deterministically cleans acquired resources`() {
         val fixture = fixture().also {
             it.platform.throwOnDiscoverServiceType = "_adb-tls-connect._tcp"
@@ -233,9 +263,49 @@ class NsdDiscoveryAdapterTest {
 
         assertEquals(result, NsdDiscoveryStartResult.Rejected(NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED))
         assertEquals(fixture.platform.discoveries.size, 1)
-        assertExactlyOnce(fixture.platform.discoveries.single().resource)
-        assertExactlyOnce(fixture.platform.multicastLocks.single())
-        assertExactlyOnce(fixture.scheduler.scheduled.single().resource)
+        assertAllActuallyAcquiredResourcesReleased(fixture)
+        assertTrue(fixture.events.isEmpty())
+    }
+
+    @Test
+    fun `multicast lock acquisition exception is contained as a safe start rejection without creating later resources`() {
+        val fixture = fixture().also { it.platform.throwOnAcquireMulticastLock = true }
+
+        val result = fixture.adapter.start(request(generation = 675L, apiLevel = 30))
+
+        assertEquals(result, NsdDiscoveryStartResult.Rejected(NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED))
+        assertTrue(fixture.platform.multicastLocks.isEmpty())
+        assertTrue(fixture.platform.discoveries.isEmpty())
+        assertTrue(fixture.platform.resolves.isEmpty())
+        assertTrue(fixture.scheduler.scheduled.isEmpty())
+        assertTrue(fixture.events.isEmpty())
+    }
+
+    @Test
+    fun `scheduler exception occurs after discovery registration and releases every previously acquired resource safely`() {
+        val fixture = fixture().also { it.scheduler.throwOnSchedule = true }
+
+        val result = fixture.adapter.start(request(generation = 676L, apiLevel = 30))
+
+        assertEquals(result, NsdDiscoveryStartResult.Rejected(NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED))
+        assertEquals(fixture.platform.discoveries.size, 2)
+        assertEquals(fixture.platform.multicastLocks.size, 1)
+        assertTrue(fixture.scheduler.scheduled.isEmpty())
+        assertAllActuallyAcquiredResourcesReleased(fixture)
+        assertTrue(fixture.events.isEmpty())
+    }
+
+    @Test
+    fun `API 33 network callback registration exception is contained and releases every resource acquired before it`() {
+        val fixture = fixture().also { it.platform.throwOnNetworkChangeRegistration = true }
+
+        val result = fixture.adapter.start(request(generation = 677L, apiLevel = 33, network = NETWORK_GAMMA))
+
+        assertEquals(result, NsdDiscoveryStartResult.Rejected(NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED))
+        assertTrue(fixture.platform.multicastLocks.isEmpty())
+        assertTrue(fixture.platform.networkChanges.isEmpty())
+        assertTrue(fixture.platform.discoveries.isNotEmpty() || fixture.scheduler.scheduled.isNotEmpty())
+        assertAllActuallyAcquiredResourcesReleased(fixture)
         assertTrue(fixture.events.isEmpty())
     }
 
@@ -324,6 +394,18 @@ class NsdDiscoveryAdapterTest {
         assertEquals(resource.cancelCalls, 1)
     }
 
+    private fun assertAllActuallyAcquiredResourcesReleased(fixture: Fixture) {
+        val resources = buildList {
+            addAll(fixture.platform.multicastLocks)
+            addAll(fixture.platform.discoveries.map { it.resource })
+            addAll(fixture.platform.resolves.map { it.resource })
+            addAll(fixture.platform.networkChanges.map { it.resource })
+            addAll(fixture.scheduler.scheduled.map { it.resource })
+        }
+        assertTrue(resources.isNotEmpty())
+        resources.forEach(::assertExactlyOnce)
+    }
+
     private fun invokeLegacyTerminal(terminal: LegacyTerminal, fixture: Fixture) {
         when (terminal) {
             LegacyTerminal.STOP -> fixture.adapter.stop()
@@ -361,9 +443,17 @@ class NsdDiscoveryAdapterTest {
         val discoveries = mutableListOf<DiscoverCall>()
         val resolves = mutableListOf<ResolveCall>()
         val networkChanges = mutableListOf<NetworkChangeCall>()
+        var throwOnAcquireMulticastLock = false
         var throwOnDiscoverServiceType: String? = null
+        var throwOnResolveService: NsdServiceRef? = null
+        var throwOnNetworkChangeRegistration = false
 
-        override fun acquireMulticastLock(): NsdPlatformResource = FakeResource().also(multicastLocks::add)
+        override fun acquireMulticastLock(): NsdPlatformResource {
+            if (throwOnAcquireMulticastLock) {
+                throw NsdPlatformOperationException(NsdPlatformFailure.OPERATION_FAILED)
+            }
+            return FakeResource().also(multicastLocks::add)
+        }
 
         override fun discover(
             serviceType: String,
@@ -382,15 +472,25 @@ class NsdDiscoveryAdapterTest {
             service: NsdServiceRef,
             network: NsdNetworkRef?,
             callbacks: NsdResolveCallbacks,
-        ): NsdPlatformResource = FakeResource().also { resource ->
-            resolves += ResolveCall(service, network, callbacks, resource)
+        ): NsdPlatformResource {
+            if (service == throwOnResolveService) {
+                throw NsdPlatformOperationException(NsdPlatformFailure.OPERATION_FAILED)
+            }
+            return FakeResource().also { resource ->
+                resolves += ResolveCall(service, network, callbacks, resource)
+            }
         }
 
         override fun registerNetworkChangeCallback(
             network: NsdNetworkRef,
             callbacks: NsdNetworkChangeCallbacks,
-        ): NsdPlatformResource = FakeResource().also { resource ->
-            networkChanges += NetworkChangeCall(network, callbacks, resource)
+        ): NsdPlatformResource {
+            if (throwOnNetworkChangeRegistration) {
+                throw NsdPlatformOperationException(NsdPlatformFailure.OPERATION_FAILED)
+            }
+            return FakeResource().also { resource ->
+                networkChanges += NetworkChangeCall(network, callbacks, resource)
+            }
         }
 
         fun discoveryFor(type: WirelessServiceType): DiscoverCall = discoveries.single {
@@ -406,8 +506,12 @@ class NsdDiscoveryAdapterTest {
     private class FakeScheduler : NsdScheduler {
         val delays = mutableListOf<Long>()
         val scheduled = mutableListOf<ScheduledCall>()
+        var throwOnSchedule = false
 
         override fun schedule(delayMillis: Long, action: () -> Unit): NsdPlatformResource {
+            if (throwOnSchedule) {
+                throw NsdPlatformOperationException(NsdPlatformFailure.OPERATION_FAILED)
+            }
             delays += delayMillis
             return FakeResource().also { resource -> scheduled += ScheduledCall(resource, action) }
         }
