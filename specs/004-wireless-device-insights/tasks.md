@@ -90,9 +90,9 @@
   - **验收**: T019 从缺少公共入口的编译失败推进为行为失败；入口仅接受项目自有 `PairingSecret`/`PairingMethod`，默认兼容实现拒绝并清理 secret，结构化冲突不含端点或 secret，既有 manager fake 无需新增实现即可编译。
 - [X] T020 [US1] 接入 QR/配对码共用 Kadb client path 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/KadbProtocolClientFactory.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
   - **验收**: T019、既有配对码测试和 manager 回归通过；QR password 不被错误限制为六位，所有结束路径清零，配对不会创建第二个活动 Session。
-- [ ] T021 [P] [US1] 先写 QR matrix encoder 失败测试，覆盖 UTF-8 payload、固定 quiet zone/纠错配置、正方形矩阵、确定性输出和不提供 decode/camera API 于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/QrMatrixEncoderTest.kt`
+- [X] T021 [P] [US1] 先写 QR matrix encoder 失败测试，覆盖 UTF-8 payload、固定 quiet zone/纠错配置、正方形矩阵、确定性输出和不提供 decode/camera API 于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/QrMatrixEncoderTest.kt`
   - **验收**: 目标测试因 encoder 缺失而失败；测试不把真实 QR 图像写入磁盘或 golden 文件。
-- [ ] T022 [US1] 实现隔离 ZXing 类型的 QR 编码器于 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/QrMatrixEncoder.kt`
+- [X] T022 [US1] 实现隔离 ZXing 类型的 QR 编码器于 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/QrMatrixEncoder.kt`
   - **验收**: T021 通过；公开 Feature 状态不暴露 ZXing 类型，不含扫码/相机入口，释放 pairing material 后不缓存旧矩阵。
 - [ ] T023 [P] [US1] 先写配对 reducer 失败测试，覆盖 QR/配对码选择、准备/等待/成功/失败/取消/过期、不支持回退、六位码立即清除和 Session 替换确认于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/DevicesPairingReducerTest.kt`
   - **验收**: 目标测试因 reducer/model 缺失而失败；每个规格状态均有独立断言，已有 Session 未确认时不得产生 connect effect。
