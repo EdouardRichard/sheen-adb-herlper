@@ -51,6 +51,7 @@ import java.util.concurrent.atomic.AtomicLong
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -99,19 +100,29 @@ internal class DefaultAdbSessionManager(
         data class Terminal(val error: AdbError) : WirelessDiscoverySignal
     }
 
+    private sealed interface WirelessDiscoveryCallResult<out T> {
+        data class Value<T>(val value: T) : WirelessDiscoveryCallResult<T>
+
+        data class Cancelled(val cancellation: CancellationException) : WirelessDiscoveryCallResult<Nothing>
+
+        data object Failed : WirelessDiscoveryCallResult<Nothing>
+    }
+
     private class ActiveWirelessDiscovery(
         val generation: Long,
         val ownerSessionId: String?,
     ) {
         val signals = Channel<WirelessDiscoverySignal>(Channel.UNLIMITED)
+        val terminalCompletion = CompletableDeferred<AdbError>()
 
         private val stateLock = Any()
         private val sourceLock = Any()
         private var terminal = false
         private var terminalError: AdbError? = null
+        private var terminalPublished = false
         private var source: WirelessDiscoverySource? = null
-        private var sourceCloseRequested = false
-        private var sourceClosed = false
+        private var sourceAttachmentComplete = false
+        private var sourceCloseState = SourceCloseState.OPEN
 
         fun isTerminal(): Boolean = synchronized(stateLock) { terminal }
 
@@ -130,41 +141,57 @@ internal class DefaultAdbSessionManager(
             true
         }
 
-        fun attachSource(value: WirelessDiscoverySource) {
+        fun attachSource(value: WirelessDiscoverySource) = synchronized(sourceLock) {
+            check(!sourceAttachmentComplete) { "Wireless discovery source attachment already completed." }
+            source = value
+            sourceAttachmentComplete = true
+        }
+
+        fun markSourceUnavailable() = synchronized(sourceLock) {
+            if (!sourceAttachmentComplete) sourceAttachmentComplete = true
+        }
+
+        fun closeSourceIfReady(): Boolean {
             var closeNow: WirelessDiscoverySource? = null
             synchronized(sourceLock) {
-                check(source == null) { "Wireless discovery source already attached." }
-                source = value
-                if (sourceCloseRequested && !sourceClosed) {
-                    sourceClosed = true
-                    closeNow = value
+                if (!sourceAttachmentComplete) return false
+                when (sourceCloseState) {
+                    SourceCloseState.CLOSING -> return false
+                    SourceCloseState.CLOSED -> return true
+                    SourceCloseState.OPEN -> {
+                        sourceCloseState = SourceCloseState.CLOSING
+                        closeNow = source
+                    }
                 }
             }
             closeNow?.let { runCatching { it.close() } }
+            synchronized(sourceLock) {
+                sourceCloseState = SourceCloseState.CLOSED
+            }
+            return true
         }
 
         fun publishTerminal(error: AdbError) {
-            signals.trySend(WirelessDiscoverySignal.Terminal(error))
-            signals.close()
-            requestSourceClose()
-        }
-
-        fun retire() {
-            signals.close()
-            requestSourceClose()
-        }
-
-        private fun requestSourceClose() {
-            var closeNow: WirelessDiscoverySource? = null
-            synchronized(sourceLock) {
-                sourceCloseRequested = true
-                val current = source
-                if (current != null && !sourceClosed) {
-                    sourceClosed = true
-                    closeNow = current
+            val shouldPublish = synchronized(stateLock) {
+                if (terminalPublished) false else {
+                    terminalPublished = true
+                    true
                 }
             }
-            closeNow?.let { runCatching { it.close() } }
+            if (!shouldPublish) return
+            terminalCompletion.complete(error)
+            signals.trySend(WirelessDiscoverySignal.Terminal(error))
+            signals.close()
+        }
+
+        fun finishRetirement() {
+            signals.close()
+        }
+
+        private enum class SourceCloseState {
+            OPEN,
+            CLOSING,
+            CLOSED,
         }
     }
 
@@ -228,79 +255,107 @@ internal class DefaultAdbSessionManager(
         }
 
         var state = WirelessDiscoveryState(generation = discovery.generation)
-        var started = false
+        val reducer = WirelessDiscoveryReducer()
+        var pendingSourceCancellation: CancellationException? = null
         try {
-            val factory = wirelessDiscoverySourceFactory
-            if (discovery.isTerminal()) {
-                Unit
-            } else if (factory == null) {
-                terminateWirelessDiscovery(discovery, AdbError.DiscoveryPlatformFailure)
-            } else {
-                val observer = object : WirelessDiscoverySourceObserver {
-                    override fun onEvent(event: WirelessDiscoveryEvent) {
-                        publishWirelessDiscoveryEvent(discovery, event)
-                    }
-
-                    override fun onFailure(failure: WirelessDiscoverySourceFailure) {
-                        terminateWirelessDiscovery(discovery, discoveryError(failure))
-                    }
-                }
-                val source = try {
-                    factory.create(observer)
-                } catch (_: Throwable) {
-                    terminateWirelessDiscovery(discovery, AdbError.DiscoveryPlatformFailure)
-                    null
-                }
-                if (source != null) {
-                    discovery.attachSource(source)
-                    if (!discovery.isTerminal()) {
-                        val startResult = try {
-                            source.start(
-                                WirelessDiscoverySourceRequest(
-                                    generation = discovery.generation,
-                                    mode = mode,
-                                ),
-                            )
-                        } catch (_: Throwable) {
-                            terminateWirelessDiscovery(discovery, AdbError.DiscoveryPlatformFailure)
-                            null
-                        }
-                        when (startResult) {
-                            WirelessDiscoverySourceStartResult.Started -> {
-                                if (!discovery.isTerminal()) {
-                                    started = true
-                                    appendDiagnostic(
-                                        AdbOperationStage.DISCOVERY,
-                                        AdbDiagnosticOutcome.STARTED,
-                                        "ADB_DISCOVERY_STARTED",
-                                        null,
-                                    )
-                                    emit(AdbOperationResult.Success(state))
-                                }
-                            }
-
-                            is WirelessDiscoverySourceStartResult.Rejected -> {
-                                terminateWirelessDiscovery(discovery, discoveryError(startResult.failure))
-                            }
-
-                            null -> Unit
-                        }
-                    }
-                }
-            }
-
-            if (!started) {
-                val error = discovery.terminalError() ?: AdbError.DiscoveryPlatformFailure
-                emit(operationFailure(error, null, null))
-                return@flow
-            }
-
             try {
                 withTimeout(timeout) {
+                    val factory = wirelessDiscoverySourceFactory
+                    if (discovery.isTerminal()) {
+                        discovery.markSourceUnavailable()
+                        completePendingWirelessDiscovery(discovery)
+                    } else if (factory == null) {
+                        discovery.markSourceUnavailable()
+                        terminateWirelessDiscovery(discovery, AdbError.DiscoveryPlatformFailure)
+                    } else {
+                        val observer = object : WirelessDiscoverySourceObserver {
+                            override fun onEvent(event: WirelessDiscoveryEvent) {
+                                publishWirelessDiscoveryEvent(discovery, event)
+                            }
+
+                            override fun onFailure(failure: WirelessDiscoverySourceFailure) {
+                                terminateWirelessDiscovery(discovery, discoveryError(failure))
+                            }
+                        }
+                        val sourceResult = try {
+                            runInterruptible(ioDispatcher) {
+                                captureWirelessDiscoveryCall { factory.create(observer) }
+                            }
+                        } catch (error: CancellationException) {
+                            discovery.markSourceUnavailable()
+                            completePendingWirelessDiscovery(discovery)
+                            throw error
+                        }
+                        val source = when (sourceResult) {
+                            is WirelessDiscoveryCallResult.Value -> sourceResult.value
+                            is WirelessDiscoveryCallResult.Cancelled -> {
+                                discovery.markSourceUnavailable()
+                                pendingSourceCancellation = sourceResult.cancellation
+                                return@withTimeout
+                            }
+                            WirelessDiscoveryCallResult.Failed -> {
+                                discovery.markSourceUnavailable()
+                                terminateWirelessDiscovery(discovery, AdbError.DiscoveryPlatformFailure)
+                                null
+                            }
+                        }
+                        if (source != null) {
+                            discovery.attachSource(source)
+                            completePendingWirelessDiscovery(discovery)
+                            if (!discovery.isTerminal()) {
+                                val startCallResult = try {
+                                    runInterruptible(ioDispatcher) {
+                                        captureWirelessDiscoveryCall {
+                                            source.start(
+                                                WirelessDiscoverySourceRequest(
+                                                    generation = discovery.generation,
+                                                    mode = mode,
+                                                ),
+                                            )
+                                        }
+                                    }
+                                } catch (error: CancellationException) {
+                                    throw error
+                                }
+                                val startResult = when (startCallResult) {
+                                    is WirelessDiscoveryCallResult.Value -> startCallResult.value
+                                    is WirelessDiscoveryCallResult.Cancelled -> {
+                                        pendingSourceCancellation = startCallResult.cancellation
+                                        return@withTimeout
+                                    }
+                                    WirelessDiscoveryCallResult.Failed -> {
+                                        terminateWirelessDiscovery(discovery, AdbError.DiscoveryPlatformFailure)
+                                        null
+                                    }
+                                }
+                                when (startResult) {
+                                    WirelessDiscoverySourceStartResult.Started -> Unit
+                                    is WirelessDiscoverySourceStartResult.Rejected -> {
+                                        terminateWirelessDiscovery(discovery, discoveryError(startResult.failure))
+                                    }
+                                    null -> Unit
+                                }
+                            }
+                        }
+                    }
+
+                    if (discovery.isTerminal()) {
+                        val error = discovery.terminalCompletion.await()
+                        emit(operationFailure(error, null, null))
+                        return@withTimeout
+                    }
+
+                    appendDiagnostic(
+                        AdbOperationStage.DISCOVERY,
+                        AdbDiagnosticOutcome.STARTED,
+                        "ADB_DISCOVERY_STARTED",
+                        null,
+                    )
+                    emit(AdbOperationResult.Success(state))
                     for (signal in discovery.signals) {
                         when (signal) {
                             is WirelessDiscoverySignal.Event -> {
-                                state = WirelessDiscoveryReducer().reduce(state, signal.value)
+                                state = reducer.reduce(state, signal.value)
                                 emit(AdbOperationResult.Success(state))
                             }
 
@@ -313,8 +368,10 @@ internal class DefaultAdbSessionManager(
                 }
             } catch (_: TimeoutCancellationException) {
                 terminateWirelessDiscovery(discovery, AdbError.DiscoveryTimeout)
-                emit(operationFailure(discovery.terminalError() ?: AdbError.DiscoveryTimeout, null, null))
+                val error = discovery.terminalCompletion.await()
+                emit(operationFailure(error, null, null))
             }
+            pendingSourceCancellation?.let { throw it }
         } catch (error: CancellationException) {
             appendDiagnostic(
                 AdbOperationStage.DISCOVERY,
@@ -324,6 +381,8 @@ internal class DefaultAdbSessionManager(
             )
             throw error
         } finally {
+            discovery.markSourceUnavailable()
+            completePendingWirelessDiscovery(discovery)
             retireWirelessDiscovery(discovery)
             appendDiagnostic(
                 AdbOperationStage.DISCOVERY,
@@ -1541,33 +1600,58 @@ internal class DefaultAdbSessionManager(
         error: AdbError,
     ): Boolean {
         val terminated = synchronized(wirelessDiscoveryLock) {
-            if (activeWirelessDiscovery !== discovery || !discovery.markTerminal(error)) {
-                false
-            } else {
-                activeWirelessDiscovery = null
-                true
-            }
+            activeWirelessDiscovery === discovery && discovery.markTerminal(error)
         }
-        if (terminated) discovery.publishTerminal(error)
+        if (terminated || discovery.terminalError() != null) {
+            completePendingWirelessDiscovery(discovery)
+        }
         return terminated
     }
 
     private fun terminateActiveWirelessDiscovery(error: AdbError) {
         val discovery = synchronized(wirelessDiscoveryLock) {
             val current = activeWirelessDiscovery ?: return@synchronized null
-            if (!current.markTerminal(error)) return@synchronized null
-            activeWirelessDiscovery = null
+            current.markTerminal(error)
             current
         }
-        discovery?.publishTerminal(error)
+        discovery?.let(::completePendingWirelessDiscovery)
+    }
+
+    private fun completePendingWirelessDiscovery(discovery: ActiveWirelessDiscovery): Boolean {
+        val error = discovery.terminalError() ?: return false
+        if (!discovery.closeSourceIfReady()) return false
+        synchronized(wirelessDiscoveryLock) {
+            if (activeWirelessDiscovery === discovery) activeWirelessDiscovery = null
+        }
+        discovery.publishTerminal(error)
+        return true
     }
 
     private fun retireWirelessDiscovery(discovery: ActiveWirelessDiscovery) {
-        synchronized(wirelessDiscoveryLock) {
-            if (activeWirelessDiscovery === discovery) activeWirelessDiscovery = null
-            discovery.markRetired()
+        if (discovery.terminalError() != null) {
+            completePendingWirelessDiscovery(discovery)
+            return
         }
-        discovery.retire()
+        val ownsRetirement = synchronized(wirelessDiscoveryLock) {
+            activeWirelessDiscovery === discovery && discovery.markRetired()
+        }
+        if (!ownsRetirement) return
+        if (discovery.closeSourceIfReady()) {
+            synchronized(wirelessDiscoveryLock) {
+                if (activeWirelessDiscovery === discovery) activeWirelessDiscovery = null
+            }
+            discovery.finishRetirement()
+        }
+    }
+
+    private fun <T> captureWirelessDiscoveryCall(block: () -> T): WirelessDiscoveryCallResult<T> = try {
+        WirelessDiscoveryCallResult.Value(block())
+    } catch (error: InterruptedException) {
+        throw error
+    } catch (error: CancellationException) {
+        WirelessDiscoveryCallResult.Cancelled(error)
+    } catch (_: Throwable) {
+        WirelessDiscoveryCallResult.Failed
     }
 
     private fun discoveryError(failure: WirelessDiscoverySourceFailure): AdbError = when (failure) {
