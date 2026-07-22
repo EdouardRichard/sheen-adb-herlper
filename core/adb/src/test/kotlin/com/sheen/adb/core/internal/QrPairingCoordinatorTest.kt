@@ -2,6 +2,7 @@ package com.sheen.adb.core.internal
 
 import com.sheen.adb.core.PairingAttemptId
 import com.sheen.adb.core.PairingAttemptPhase
+import com.sheen.adb.core.PairingSecret
 import com.sheen.adb.core.WirelessObservationId
 import com.sheen.adb.core.WirelessServiceObservation
 import com.sheen.adb.core.WirelessServiceStatus
@@ -22,76 +23,95 @@ class QrPairingCoordinatorTest {
         val clock = FakeClock(nowMillis = 1_000)
         val entropy = DeterministicSecureRandom()
         val coordinator = Harness(clock, entropy)
-        val material = coordinator.start(attemptId("material"))
-        val serviceInstance = coordinator.serviceInstance(material)
-        val password = coordinator.password(material)
-
-        assertTrue(serviceInstance.matches(Regex("studio-[A-Za-z0-9-]{10}")))
-        assertEquals(password.size, 12)
-        assertTrue(password.all { it in PASSWORD_ALPHABET })
-        assertEquals(
-            coordinator.payload(material),
-            "WIFI:T:ADB;S:$serviceInstance;P:${password.concatToString()};;",
-        )
-        assertEquals(coordinator.deadlineMillis(material), 121_000L)
-        assertTrue(entropy.nextBytesCalls >= 2, "The coordinator must use the injected SecureRandom")
-
         val duplicateHarness = Harness(FakeClock(nowMillis = 1_000), DeterministicSecureRandom())
-        val duplicateMaterial = duplicateHarness.start(attemptId("deterministic-copy"))
-        assertEquals(duplicateHarness.serviceInstance(duplicateMaterial), serviceInstance)
-        assertEquals(duplicateHarness.password(duplicateMaterial).toList(), password.toList())
+        val differentHarness = Harness(FakeClock(nowMillis = 1_000), DeterministicSecureRandom(offset = 97))
+        try {
+            val material = coordinator.start(attemptId("material"))
+            val serviceInstance = coordinator.serviceInstance(material)
+            val password = coordinator.passwordValue(material)
 
-        coordinator.close()
-        assertNull(coordinator.payload(material))
-        assertCleared(password)
-        duplicateHarness.close()
+            assertTrue(serviceInstance.matches(Regex("studio-[A-Za-z0-9-]{10}")))
+            assertEquals(password.length, 12)
+            assertTrue(password.all { it in PASSWORD_ALPHABET })
+            assertEquals(coordinator.payload(material), "WIFI:T:ADB;S:$serviceInstance;P:$password;;")
+            assertEquals(coordinator.deadlineMillis(material), 121_000L)
+            assertTrue(entropy.nextBytesCalls >= 2, "The coordinator must use the injected SecureRandom")
+
+            val duplicateMaterial = duplicateHarness.start(attemptId("deterministic-copy"))
+            assertEquals(duplicateHarness.serviceInstance(duplicateMaterial), serviceInstance)
+            assertEquals(duplicateHarness.passwordValue(duplicateMaterial), password)
+
+            val differentMaterial = differentHarness.start(attemptId("different-entropy"))
+            assertFalse(
+                differentHarness.serviceInstance(differentMaterial) == serviceInstance &&
+                    differentHarness.passwordValue(differentMaterial) == password,
+                "Changing the injected entropy bytes must change generated pairing material",
+            )
+
+            coordinator.close()
+            assertNull(coordinator.payload(material))
+        } finally {
+            coordinator.close()
+            duplicateHarness.close()
+            differentHarness.close()
+        }
     }
 
     @Test
     fun `only the exact live resolved pairing service is claimed once without connecting`() {
         val coordinator = Harness(FakeClock(nowMillis = 50), DeterministicSecureRandom())
         val attemptId = attemptId("match")
-        val material = coordinator.start(attemptId)
-        val expectedName = coordinator.serviceInstance(material)
-        val expected = observation("expected", WirelessServiceType.PAIRING, expectedName, WirelessServiceStatus.RESOLVED)
+        val foreignAttempt = attemptId("foreign")
+        try {
+            val material = coordinator.start(attemptId)
+            val expectedName = coordinator.serviceInstance(material)
+            val expected = observation("expected", WirelessServiceType.PAIRING, expectedName, WirelessServiceStatus.RESOLVED)
 
-        assertNull(
-            coordinator.match(
-                attemptId,
-                observation("wrong-name", WirelessServiceType.PAIRING, "studio-wrongname0", WirelessServiceStatus.RESOLVED),
-            ),
-        )
-        assertNull(
-            coordinator.match(
-                attemptId,
-                observation("wrong-type", WirelessServiceType.CONNECT, expectedName, WirelessServiceStatus.RESOLVED),
-            ),
-        )
-        assertNull(
-            coordinator.match(
-                attemptId,
-                observation("unresolved", WirelessServiceType.PAIRING, expectedName, WirelessServiceStatus.DISCOVERED),
-            ),
-        )
+            assertNull(coordinator.match(foreignAttempt, expected))
+            assertNull(coordinator.state(foreignAttempt))
+            assertFalse(coordinator.complete(foreignAttempt, PairingAttemptPhase.CANCELLED))
+            assertNull(
+                coordinator.match(
+                    attemptId,
+                    observation("wrong-name", WirelessServiceType.PAIRING, "studio-wrongname0", WirelessServiceStatus.RESOLVED),
+                ),
+            )
+            assertNull(
+                coordinator.match(
+                    attemptId,
+                    observation("wrong-type", WirelessServiceType.CONNECT, expectedName, WirelessServiceStatus.RESOLVED),
+                ),
+            )
+            assertNull(
+                coordinator.match(
+                    attemptId,
+                    observation("unresolved", WirelessServiceType.PAIRING, expectedName, WirelessServiceStatus.DISCOVERED),
+                ),
+            )
 
-        val match = coordinator.match(attemptId, expected)
+            val match = checkNotNull(coordinator.match(attemptId, expected))
+            val password = coordinator.matchPassword(match)
+            assertEquals(coordinator.matchObservationId(match), expected.observationId)
+            assertEquals(coordinator.state(attemptId), PairingAttemptPhase.PAIRING)
+            assertNull(coordinator.match(attemptId, expected), "A duplicate scan must not claim the target twice")
+            assertEquals(
+                coordinator.constructorParameterTypes(),
+                listOf(MonotonicClock::class.java, SecureRandom::class.java),
+                "The coordinator must not receive a Session or connection collaborator",
+            )
+            assertFalse(
+                coordinator.coordinatorClass.declaredMethods.any { it.name.contains("connect", ignoreCase = true) },
+                "The QR coordinator must only return pairing authorization, never connect",
+            )
 
-        assertNotNull(match)
-        assertEquals(coordinator.matchObservationId(checkNotNull(match)), expected.observationId)
-        assertEquals(coordinator.state(attemptId), PairingAttemptPhase.PAIRING)
-        assertNull(coordinator.match(attemptId, expected), "A duplicate scan must not claim the target twice")
-        assertFalse(
-            coordinator.coordinatorClass.declaredMethods.any { it.name.contains("connect", ignoreCase = true) },
-            "The QR coordinator must not expose an automatic connect path",
-        )
-
-        val password = coordinator.password(material)
-        assertTrue(coordinator.complete(attemptId, PairingAttemptPhase.SUCCEEDED))
-        assertFalse(coordinator.complete(attemptId, PairingAttemptPhase.FAILED))
-        assertEquals(coordinator.state(attemptId), PairingAttemptPhase.SUCCEEDED)
-        assertNull(coordinator.payload(material))
-        assertCleared(password)
-        coordinator.close()
+            assertTrue(coordinator.complete(attemptId, PairingAttemptPhase.SUCCEEDED))
+            assertFalse(coordinator.complete(attemptId, PairingAttemptPhase.FAILED))
+            assertEquals(coordinator.state(attemptId), PairingAttemptPhase.SUCCEEDED)
+            assertNull(coordinator.payload(material))
+            assertCleared(password)
+        } finally {
+            coordinator.close()
+        }
     }
 
     @Test
@@ -99,46 +119,61 @@ class QrPairingCoordinatorTest {
         val clock = FakeClock(nowMillis = 500)
         val coordinator = Harness(clock, DeterministicSecureRandom())
         val attemptId = attemptId("expired")
-        val material = coordinator.start(attemptId)
-        val password = coordinator.password(material)
-        val service = observation(
-            "late",
-            WirelessServiceType.PAIRING,
-            coordinator.serviceInstance(material),
-            WirelessServiceStatus.RESOLVED,
-        )
-        clock.nowMillis = coordinator.deadlineMillis(material)
+        try {
+            val material = coordinator.start(attemptId)
+            val service = observation(
+                "late",
+                WirelessServiceType.PAIRING,
+                coordinator.serviceInstance(material),
+                WirelessServiceStatus.RESOLVED,
+            )
+            clock.nowMillis = coordinator.deadlineMillis(material)
 
-        assertNull(coordinator.match(attemptId, service))
-        assertNull(coordinator.match(attemptId, service))
-        assertEquals(coordinator.state(attemptId), PairingAttemptPhase.EXPIRED)
-        assertNull(coordinator.payload(material))
-        assertCleared(password)
-        coordinator.close()
+            assertNull(coordinator.match(attemptId, service))
+            assertNull(coordinator.match(attemptId, service))
+            assertEquals(coordinator.state(attemptId), PairingAttemptPhase.EXPIRED)
+            assertNull(coordinator.payload(material))
+        } finally {
+            coordinator.close()
+        }
     }
 
     @Test
     fun `terminal attempt wins once and later attempts never reuse material`() {
         val coordinator = Harness(FakeClock(), DeterministicSecureRandom())
         val firstId = attemptId("first-result")
-        val first = coordinator.start(firstId)
-        val firstService = coordinator.serviceInstance(first)
-        val firstPassword = coordinator.password(first)
-        val firstPasswordValue = firstPassword.concatToString()
+        try {
+            val first = coordinator.start(firstId)
+            val firstService = coordinator.serviceInstance(first)
+            val firstPasswordValue = coordinator.passwordValue(first)
 
-        assertTrue(coordinator.complete(firstId, PairingAttemptPhase.CANCELLED))
-        assertFalse(coordinator.complete(firstId, PairingAttemptPhase.SUCCEEDED))
-        assertEquals(coordinator.state(firstId), PairingAttemptPhase.CANCELLED)
-        assertNull(coordinator.payload(first))
-        assertCleared(firstPassword)
+            assertTrue(coordinator.complete(firstId, PairingAttemptPhase.CANCELLED))
+            assertFalse(coordinator.complete(firstId, PairingAttemptPhase.SUCCEEDED))
+            assertEquals(coordinator.state(firstId), PairingAttemptPhase.CANCELLED)
+            assertNull(coordinator.payload(first))
 
-        val secondId = attemptId("second-result")
-        val second = coordinator.start(secondId)
-        assertFalse(coordinator.serviceInstance(second) == firstService)
-        assertFalse(coordinator.password(second).concatToString() == firstPasswordValue)
-        coordinator.close()
-        assertNull(coordinator.payload(second))
-        assertCleared(coordinator.password(second))
+            val secondId = attemptId("second-result")
+            val second = coordinator.start(secondId)
+            val secondService = observation(
+                "second",
+                WirelessServiceType.PAIRING,
+                coordinator.serviceInstance(second),
+                WirelessServiceStatus.RESOLVED,
+            )
+            assertFalse(coordinator.serviceInstance(second) == firstService)
+            assertFalse(coordinator.passwordValue(second) == firstPasswordValue)
+            assertNull(coordinator.match(firstId, secondService))
+            assertFalse(coordinator.complete(firstId, PairingAttemptPhase.CANCELLED))
+            assertEquals(coordinator.state(secondId), PairingAttemptPhase.WAITING_FOR_TARGET)
+            val secondMatch = checkNotNull(coordinator.match(secondId, secondService))
+            val secondPassword = coordinator.matchPassword(secondMatch)
+
+            coordinator.close()
+            assertNull(coordinator.payload(second))
+            assertCleared(secondPassword)
+        } finally {
+            coordinator.close()
+        }
     }
 
     private fun observation(
@@ -192,14 +227,18 @@ class QrPairingCoordinatorTest {
 
         fun payload(material: Any): String? = property(material, "getPayload") as String?
 
-        fun password(material: Any): CharArray {
-            val field = material.javaClass.getDeclaredField("password")
-            field.isAccessible = true
-            return field.get(material) as CharArray
-        }
+        fun passwordValue(material: Any): String = checkNotNull(payload(material))
+            .substringAfter(";P:")
+            .substringBefore(";;")
+
+        fun matchPassword(match: Any): CharArray =
+            (property(match, "getSecret") as PairingSecret).withChars { it }
 
         fun matchObservationId(match: Any): WirelessObservationId =
             property(match, "getObservationId") as WirelessObservationId
+
+        fun constructorParameterTypes(): List<Class<*>> =
+            coordinatorClass.declaredConstructors.single().parameterTypes.toList()
 
         override fun close() {
             invoke("close")
@@ -229,9 +268,11 @@ class QrPairingCoordinatorTest {
         override fun nowMillis(): Long = nowMillis
     }
 
-    private class DeterministicSecureRandom : SecureRandom() {
+    private class DeterministicSecureRandom(
+        private val offset: Int = 0,
+    ) : SecureRandom() {
         var nextBytesCalls = 0
-        private var next = 0
+        private var next = offset
 
         override fun nextBytes(bytes: ByteArray) {
             nextBytesCalls += 1
