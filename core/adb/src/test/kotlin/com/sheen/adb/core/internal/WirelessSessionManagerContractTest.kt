@@ -145,6 +145,27 @@ class WirelessSessionManagerContractTest {
     }
 
     @Test
+    fun `timeout closes a source returned after the factory thread is interrupted`() = runBlocking {
+        val createGate = BlockingGate()
+        val sourceFactory = FakeWirelessDiscoverySourceFactory(
+            createGate = createGate,
+            returnSourceAfterCreateInterrupt = true,
+        )
+        val manager = manager(sourceFactory)
+
+        val results = withTimeout(2.seconds) {
+            manager.observeWirelessServices(WirelessDiscoveryMode.LAN_FOREGROUND, 75.milliseconds).toList()
+        }
+        val source = sourceFactory.awaitSource(0)
+
+        assertEquals(results.size, 1)
+        assertDiscoveryFailure(results.single(), "ADB_DISCOVERY_TIMEOUT")
+        assertEquals(source.closeCalls.get(), 1)
+        manager.close()
+        assertEquals(source.closeCalls.get(), 1)
+    }
+
+    @Test
     fun `timeout bounds source start and closes the attached source exactly once`() = runBlocking {
         val startGate = BlockingGate()
         val sourceFactory = FakeWirelessDiscoverySourceFactory(startGate = startGate)
@@ -413,11 +434,16 @@ class WirelessSessionManagerContractTest {
         private val closeGate: BlockingGate? = null,
         private val createFailure: Throwable? = null,
         private val startFailure: Throwable? = null,
+        private val returnSourceAfterCreateInterrupt: Boolean = false,
     ) : WirelessDiscoverySourceFactory {
         val sources = CopyOnWriteArrayList<FakeWirelessDiscoverySource>()
 
         override fun create(observer: WirelessDiscoverySourceObserver): WirelessDiscoverySource {
-            createGate?.awaitRelease()
+            try {
+                createGate?.awaitRelease()
+            } catch (error: InterruptedException) {
+                if (!returnSourceAfterCreateInterrupt) throw error
+            }
             createFailure?.let { throw it }
             return FakeWirelessDiscoverySource(
                 observer = observer,
