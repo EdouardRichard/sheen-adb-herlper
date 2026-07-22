@@ -236,12 +236,11 @@ internal class KadbProtocolClientFactory(context: Context) : AdbProtocolClientFa
     }
 
     override suspend fun pair(endpoint: AdbEndpoint, pairingCode: CharArray) {
-        val transientCode = pairingCode.concatToString()
         try {
             Kadb.pair(
                 host = endpoint.host,
                 port = endpoint.port,
-                pairingCode = transientCode,
+                pairingCode = pairingCode.concatToString(),
                 name = "Sheen ADB Helper",
             )
         } finally {

@@ -20,6 +20,8 @@ import com.sheen.adb.core.ExclusiveAdbOperationLease
 import com.sheen.adb.core.FileTransferProgress
 import com.sheen.adb.core.LogcatConfig
 import com.sheen.adb.core.LogcatLine
+import com.sheen.adb.core.PairingMethod
+import com.sheen.adb.core.PairingSecret
 import com.sheen.adb.core.ProcessSnapshot
 import com.sheen.adb.core.RemoteApplication
 import com.sheen.adb.core.RemoteApplicationEnabledState
@@ -1005,18 +1007,44 @@ internal class DefaultAdbSessionManager(
         pairingEndpoint: AdbEndpoint,
         pairingCode: CharArray,
         timeout: Duration,
+    ): AdbOperationResult<Unit> = pairWithSecret(
+        pairingEndpoint = pairingEndpoint,
+        pairingSecret = PairingSecret(pairingCode),
+        method = PairingMethod.SIX_DIGIT_CODE,
+        timeout = timeout,
+    )
+
+    override suspend fun pairWithSecret(
+        pairingEndpoint: AdbEndpoint,
+        pairingSecret: PairingSecret,
+        method: PairingMethod,
+        timeout: Duration,
     ): AdbOperationResult<Unit> = mutex.withLock {
+        val pairingChars = pairingSecret.withChars { it }
         if (closed.get()) {
-            pairingCode.fill('\u0000')
+            pairingSecret.clear()
             return@withLock failure(AdbError.Unknown(AdbOperationStage.PAIR), pairingEndpoint, null)
         }
+        if (active != null) {
+            pairingSecret.clear()
+            return@withLock operationFailure(AdbError.PairingSessionConflict, pairingEndpoint, null)
+        }
+        if (method == PairingMethod.NONE) {
+            pairingSecret.clear()
+            return@withLock operationFailure(AdbError.PairingUnsupported, pairingEndpoint, null)
+        }
         terminateActiveWirelessDiscovery(AdbError.DiscoverySessionChanged)
-        runInterruptible(ioDispatcher) { closeActiveIfPresent() }
         appendDiagnostic(AdbOperationStage.PAIR, AdbDiagnosticOutcome.STARTED, "ADB_PAIR_STARTED", pairingEndpoint)
         mutableState.value = AdbConnectionState.Pairing(pairingEndpoint)
         try {
-            require(pairingCode.size == 6 && pairingCode.all(Char::isDigit))
-            withTimeout(timeout) { withContext(ioDispatcher) { clientFactory.pair(pairingEndpoint, pairingCode) } }
+            when (method) {
+                PairingMethod.QR -> require(pairingChars.isNotEmpty())
+                PairingMethod.SIX_DIGIT_CODE -> require(
+                    pairingChars.size == 6 && pairingChars.all { it in '0'..'9' },
+                )
+                PairingMethod.NONE -> error("Pairing method was checked before dispatch.")
+            }
+            withTimeout(timeout) { withContext(ioDispatcher) { clientFactory.pair(pairingEndpoint, pairingChars) } }
             mutableState.value = AdbConnectionState.Disconnected()
             appendDiagnostic(AdbOperationStage.PAIR, AdbDiagnosticOutcome.SUCCEEDED, "ADB_PAIR_SUCCEEDED", pairingEndpoint)
             AdbOperationResult.Success(Unit)
@@ -1032,7 +1060,7 @@ internal class DefaultAdbSessionManager(
             val mapped = AdbExceptionMapper.map(error, AdbOperationStage.PAIR)
             failure(mapped, pairingEndpoint, error)
         } finally {
-            pairingCode.fill('\u0000')
+            pairingSecret.clear()
         }
     }
 
