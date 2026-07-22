@@ -196,7 +196,7 @@ class WirelessDiscoveryState(
     services: List<WirelessServiceObservation> = emptyList(),
 ) {
     val services: List<WirelessServiceObservation> = immutableList(services).also(::requireUniqueObservationIds)
-    val devices: List<WirelessDisplayDevice> = displayDevicesFor(this.services)
+    val devices: List<WirelessDisplayDevice> = immutableList(displayDevicesFor(this.services))
 
     fun copy(
         generation: Long = this.generation,
