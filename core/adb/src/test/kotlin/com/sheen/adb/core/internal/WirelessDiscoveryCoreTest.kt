@@ -4,7 +4,6 @@ import com.sheen.adb.core.VerifiedWirelessDeviceId
 import com.sheen.adb.core.WirelessAddress
 import com.sheen.adb.core.WirelessDiscoveryEvent
 import com.sheen.adb.core.WirelessDiscoveryState
-import com.sheen.adb.core.WirelessNetworkKey
 import com.sheen.adb.core.WirelessObservationId
 import com.sheen.adb.core.WirelessServiceObservation
 import com.sheen.adb.core.WirelessServiceStatus
@@ -216,7 +215,6 @@ class WirelessDiscoveryCoreTest {
         lastSeenAt: Long = 1L,
         verifiedDeviceId: VerifiedWirelessDeviceId? = null,
     ): WirelessServiceObservation = WirelessServiceObservation(
-        networkKey = WirelessNetworkKey("network-synthetic-alpha"),
         observationId = observationId,
         serviceType = type,
         serviceName = name,
