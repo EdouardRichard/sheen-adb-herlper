@@ -176,9 +176,7 @@ class WirelessSessionManagerContractTest {
         val createManager = manager(createFactory)
         var caughtFromCreate: CancellationException? = null
         try {
-            withTimeout(2.seconds) {
-                createManager.observeWirelessServices(WirelessDiscoveryMode.LAN_FOREGROUND, 5.seconds).toList()
-            }
+            createManager.observeWirelessServices(WirelessDiscoveryMode.LAN_FOREGROUND, 75.milliseconds).toList()
         } catch (error: CancellationException) {
             caughtFromCreate = error
         } finally {
@@ -190,9 +188,7 @@ class WirelessSessionManagerContractTest {
         val startManager = manager(startFactory)
         var caughtFromStart: CancellationException? = null
         try {
-            withTimeout(2.seconds) {
-                startManager.observeWirelessServices(WirelessDiscoveryMode.LAN_FOREGROUND, 5.seconds).toList()
-            }
+            startManager.observeWirelessServices(WirelessDiscoveryMode.LAN_FOREGROUND, 75.milliseconds).toList()
         } catch (error: CancellationException) {
             caughtFromStart = error
         } finally {
