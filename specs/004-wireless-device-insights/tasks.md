@@ -49,7 +49,7 @@
   - **验收**: T007 通过；停止、取消、网络变化和异常均注销 callback、取消 resolve、释放 MulticastLock，且代码中不存在子网枚举或端口探测循环。
 - [X] T009 [P] 先写配对生命周期失败测试，覆盖 QR/六位码状态、六位 ASCII 数字、过期/取消/失败终态、secret 清零、attempt token 和旧提交拒绝于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/PairingLifecycleTest.kt`
   - **验收**: 目标测试因模型/状态机缺失而失败；fixture 只使用合成凭据且断言终态内存不再暴露原值。
-- [ ] T010 实现配对值对象与状态机于 `core/adb/src/main/kotlin/com/sheen/adb/core/PairingModels.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/pairing/PairingLifecycle.kt`
+- [X] T010 实现配对值对象与状态机于 `core/adb/src/main/kotlin/com/sheen/adb/core/PairingModels.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/pairing/PairingLifecycle.kt`
   - **验收**: T009 通过；所有终态幂等、不可回到活动态，六位码只接受 `0`–`9`，secret 在 `finally` 路径清零且不进入错误文本。
 - [ ] T011 [P] 先扩充敏感数据脱敏失败测试，覆盖 QR payload、非六位 QR password、NSD service name、IPv6/IPv4 端点和包名上下文于 `core/adb/src/test/kotlin/com/sheen/adb/core/DiagnosticRedactorTest.kt`
   - **验收**: 新断言在现有实现上失败，且测试仅使用合成值；现有配对码与端点脱敏测试保持通过。
