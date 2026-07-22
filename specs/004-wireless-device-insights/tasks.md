@@ -41,7 +41,7 @@
 
 - [X] T005 [P] 先写无线发现 reducer 的失败测试，覆盖两个 TLS service type、重复 observation 去重、可靠身份合并、未知身份分离、generation 迟到回调和 IPv4/IPv6 值对象于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/WirelessDiscoveryCoreTest.kt`
   - **验收**: `:core:adb:testDebugUnitTest --tests '*WirelessDiscoveryCoreTest'` 因缺少目标模型/reducer 或断言未满足而失败；测试不包含真实 IP、service name 或设备标识。
-- [ ] T006 实现不可变无线发现模型与 reducer 于 `core/adb/src/main/kotlin/com/sheen/adb/core/WirelessDiscoveryModels.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/WirelessDiscoveryReducer.kt`
+- [X] T006 实现不可变无线发现模型与 reducer 于 `core/adb/src/main/kotlin/com/sheen/adb/core/WirelessDiscoveryModels.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/WirelessDiscoveryReducer.kt`
   - **验收**: T005 全部通过；只接受 `_adb-tls-pairing._tcp`/`_adb-tls-connect._tcp`，未知 pairing/connect 关系保持独立，旧 generation 结果不可进入当前状态。
 - [ ] T007 [P] 先写 NSD 策略/适配器失败测试，覆盖 API 30–32 MulticastLock、API 33+ 当前 Network、API 34+ 多地址、10 秒截止、stop 资源释放和禁止 `_adb._tcp` 于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/NsdDiscoveryAdapterTest.kt`
   - **验收**: 目标测试因策略/适配器尚未实现而失败；测试以 fake platform callback 验证，不访问真实网络。
