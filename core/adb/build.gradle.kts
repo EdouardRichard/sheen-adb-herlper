@@ -29,6 +29,11 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kadb)
     implementation(libs.okio)
+    implementation(libs.apkParser) {
+        exclude(group = "com.google.code.findbugs", module = "jsr305")
+        exclude(group = "org.bouncycastle", module = "bcprov-jdk15on")
+        exclude(group = "org.bouncycastle", module = "bcpkix-jdk15on")
+    }
 
     testImplementation(libs.testng)
 }
