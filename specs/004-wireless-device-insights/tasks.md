@@ -25,11 +25,11 @@
 - [X] T001 审查 ZXing core 3.5.4 与 apk-parser 2.6.10 的 POM、许可证、传递依赖、维护状态、恶意 ZIP 防护、Android API 30 运行时、替代和移除路径，并登记到 `docs/第三方依赖审查.md` 与 `docs/第三方依赖与许可证.md`
   - **验收**: 两份文档明确 ZXing 仅用于编码且无 scanner/camera 集成、apk-parser 上游已归档且为高风险门禁、可选传递依赖处理方式及既有 `spake2-java` 发布阻断；任一 apk-parser 门禁失败都将 US4 标为 BLOCKED 并返回 Plan 选择替代实现，不允许用整项 `UNSUPPORTED` 计为应用名/图标需求完成。
 - [ ] T002 在 `gradle/libs.versions.toml` 登记通过 T001 门禁的 `zxingCore`/`apkParser` alias，并在 `app/src/main/AndroidManifest.xml` 提前声明所有 NSD 故事共享的 `ACCESS_NETWORK_STATE` 与 `CHANGE_WIFI_MULTICAST_STATE`
-  - **验收**: version catalog 可由 Gradle 解析且版本精确固定；merged Manifest 已包含两项权限且不包含位置、Nearby、相机或存储权限；若 apk-parser 门禁失败，只省略 `apkParser` alias，保留 ZXing 与共享权限并将 US4 标为 BLOCKED。
+  - **验收**: version catalog 可由 Gradle 解析且版本精确固定；merged Manifest 已包含两项权限且不包含位置、Nearby、相机或存储权限；apk-parser 仅在 T001 静态供应链门禁通过后登记，动态门禁通过前 US4 仍为 BLOCKED。
 - [ ] T003 [P] 将 ZXing core 以 implementation 方式接入 `feature/devices/build.gradle.kts`
   - **验收**: `:feature:devices:dependencies` 只出现 `com.google.zxing:core`，不出现 ZXing Android scanner、camera integration 或 JavaSE artifact，模块可完成 Debug Kotlin 编译。
-- [ ] T004 [P] 将通过全部 T001 门禁的 APK parser 以 implementation 方式接入并排除未批准可选依赖于 `core/adb/build.gradle.kts`
-  - **验收**: `:core:adb:dependencies` 的运行时图与 T001 记录一致且不新增白名单外许可证；T001 未通过时本任务不得执行，US4 保持 BLOCKED，不能静默降级为仅包名交付。
+- [ ] T004 [P] 在 T001 静态供应链门禁通过后，将 APK parser 以隔离 implementation 方式接入并排除未批准可选依赖于 `core/adb/build.gradle.kts`
+  - **验收**: `:core:adb:dependencies` 的运行时图与 T001 记录一致且不新增白名单外许可证；该接线只授权后续恶意 ZIP/API 30 验证，动态门禁实际通过前 US4 保持 BLOCKED，不能静默降级为仅包名交付。
 
 **Checkpoint**: 新依赖均有可追溯审查；依赖门禁未通过时不会被构建脚本绕过。
 

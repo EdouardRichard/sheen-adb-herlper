@@ -13,7 +13,7 @@
 ## Technical Context
 
 - **Language/Version**: Kotlin 2.3.20，JVM toolchain 17
-- **Primary Dependencies**: Android Gradle Plugin 9.1.1、Jetpack Compose BOM 2026.06.01、AndroidX Lifecycle 2.10.0、Kotlin Coroutines 1.10.2、Kadb 2.1.1、Okio 3.17.0；计划新增 `com.google.zxing:core:3.5.4`（Apache-2.0，仅 QR 编码）与 `net.dongliu:apk-parser:2.6.10`（BSD-2-Clause，仅隔离在 APK 元数据适配器）。两项依赖均先过许可证、传递依赖、安全与 Android 运行时门禁；apk-parser 门禁失败会阻塞 US4 并触发重新规划，不以整项 `UNSUPPORTED` 冒充应用名/图标需求完成。
+- **Primary Dependencies**: Android Gradle Plugin 9.1.1、Jetpack Compose BOM 2026.06.01、AndroidX Lifecycle 2.10.0、Kotlin Coroutines 1.10.2、Kadb 2.1.1、Okio 3.17.0；计划新增 `com.google.zxing:core:3.5.4`（Apache-2.0，仅 QR 编码）与 `net.dongliu:apk-parser:2.6.10`（BSD-2-Clause，仅隔离在 APK 元数据适配器）。静态 POM/许可证/维护门禁通过后允许以隔离 adapter 接线来执行构建、恶意 ZIP 与 Android API 30 验证；这些动态门禁通过前 US4 保持 BLOCKED。任一动态门禁失败会触发重新规划，不以整项 `UNSUPPORTED` 冒充应用名/图标需求完成。
 - **Storage**: DataStore 仅保留既有非敏感设备档案；二维码内容、配对口令、发现结果、应用元数据/图标、进程和 Logcat 均仅在内存及当前 Session 生命周期内；用户明确导出仍使用 SAF
 - **Testing**: TestNG/JVM 单元测试、Android lint、Gradle Debug assemble、merged Manifest 检查，以及 Android 11/12、13、14、15、16 真机/受控网络验收
 - **Target Platform**: Android 11+（minSdk 30，targetSdk/compileSdk 36）
@@ -133,7 +133,7 @@ feature/logcat/
 
 - 第一阶段继续由 `listApplications` 快速返回包名和管理状态；第二阶段 `observeApplicationMetadata(expectedSessionId)` 逐步补齐展示名与图标，UI 立即显示包名占位并标示 loading/unavailable/too-large/parse-failed 等降级。
 - `:core:adb` 先以 `pm list packages -3 -U --user <id>` 获取包名与 UID，再以受控 `pm path --user <id> <package>` 输出获得基础 APK 路径。路径只在核心层按既有命令转义策略使用，禁止 UI 拼接 Shell。APK 字节通过既有 `ProtocolSyncStream.receive` 读取到有界内存 sink；读取前后校验 32 MiB 上限，支持取消、超时、Session guard，并在完成或失败后关闭 Sync stream、释放字节，不调用面向 SAF 的公开下载流程且不落盘。单包顺序解析、总耗时 10 秒、单图标编码上限 1 MiB、全局图标 LRU 上限 16 MiB。
-- `apk-parser` 隐藏在项目自有接口之后，只接收受限内存字节；解析完成即释放原始 APK 字节。其依赖审查、恶意 ZIP 测试和 API 30 Android 运行时 smoke test 是 US4 的进入门禁；任一失败即阻塞 US4 并回到 Plan 选择替代实现，不能把包名占位或整项 `UNSUPPORTED` 计为 FR023–FR025/SC008 完成。
+- `apk-parser` 隐藏在项目自有接口之后，只接收受限内存字节；解析完成即释放原始 APK 字节。T001 的静态供应链门禁通过后才可隔离接线；恶意 ZIP 测试和 API 30 Android 运行时 smoke test 是 US4 完成门禁，在两者实际通过前 US4 保持 BLOCKED。任一失败即回到 Plan 选择替代实现，不能把包名占位或整项 `UNSUPPORTED` 计为 FR023–FR025/SC008 完成。
 - 搜索使用本地规范化后的 `packageName OR displayName`；元数据到达时重新计算，名称缺失时包名搜索始终可用。同名应用始终显示包名。
 
 ### 4. Logcat 与进程分析
