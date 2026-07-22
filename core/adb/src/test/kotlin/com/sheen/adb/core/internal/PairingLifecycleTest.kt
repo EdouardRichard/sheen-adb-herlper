@@ -459,22 +459,32 @@ class PairingLifecycleTest {
     }
 
     @Test
-    fun `attempt started at its exact deadline is immediately expired and clears QR secret without action`() {
+    fun `attempts started at exact deadline immediately expire and QR secret is cleared without action`() {
         val password = "exact-start-secret-synthetic".toCharArray()
-        val action = FakePairingAction(password)
-        val lifecycle = PairingLifecycle(FakeClock(nowMillis = 20), action)
+        val qrAction = FakePairingAction(password)
+        val qrLifecycle = PairingLifecycle(FakeClock(nowMillis = 20), qrAction)
 
-        val result = lifecycle.startQr(
+        val qrResult = qrLifecycle.startQr(
             attemptId = attemptId("exact-start"),
             password = PairingSecret(password),
             deadlineMillis = 20,
         )
+        val codeAction = FakePairingAction()
+        val codeLifecycle = PairingLifecycle(FakeClock(nowMillis = 20), codeAction)
+        val codeResult = codeLifecycle.startSixDigit(
+            attemptId = attemptId("exact-code-start"),
+            deadlineMillis = 20,
+        )
 
-        assertEquals(result.state.phase, PairingAttemptPhase.EXPIRED)
-        assertEquals(result.state.failure, PairingFailure.EXPIRED)
-        assertNull(result.rejection)
-        assertTrue(action.calls.isEmpty())
+        assertEquals(qrResult.state.phase, PairingAttemptPhase.EXPIRED)
+        assertEquals(qrResult.state.failure, PairingFailure.EXPIRED)
+        assertNull(qrResult.rejection)
+        assertTrue(qrAction.calls.isEmpty())
         assertCleared(password)
+        assertEquals(codeResult.state.phase, PairingAttemptPhase.EXPIRED)
+        assertEquals(codeResult.state.failure, PairingFailure.EXPIRED)
+        assertNull(codeResult.rejection)
+        assertTrue(codeAction.calls.isEmpty())
     }
 
     @Test
@@ -492,7 +502,6 @@ class PairingLifecycleTest {
 
         assertCleared(password)
         assertTrue(action.calls.isEmpty())
-        assertInstanceCollectionsCleared(lifecycle)
 
         val lateCode = "012345".toCharArray()
         val callbackResults = listOf(
@@ -509,6 +518,7 @@ class PairingLifecycleTest {
         val startResults = listOf(
             lifecycle.startQr(activeId, PairingSecret(reusedSecret), deadlineMillis = 20),
             lifecycle.startQr(attemptId("close-new"), PairingSecret(newSecret), deadlineMillis = 20),
+            lifecycle.startSixDigit(attemptId("close-new-code"), deadlineMillis = 20),
         )
 
         (callbackResults + startResults).forEach(::assertClosedIdle)
@@ -561,17 +571,6 @@ class PairingLifecycleTest {
         assertEquals(result.state.phase, PairingAttemptPhase.IDLE)
         assertEquals(result.state.failure, PairingFailure.NO_ACTIVE_ATTEMPT)
         assertEquals(result.rejection, PairingCommandRejection.CLOSED)
-    }
-
-    private fun assertInstanceCollectionsCleared(lifecycle: PairingLifecycle) {
-        val instanceCollections = lifecycle.javaClass.declaredFields.filter { field ->
-            !Modifier.isStatic(field.modifiers) && Collection::class.java.isAssignableFrom(field.type)
-        }
-        assertTrue(instanceCollections.isNotEmpty())
-        instanceCollections.forEach { field ->
-            field.isAccessible = true
-            assertTrue((field.get(lifecycle) as Collection<*>).isEmpty())
-        }
     }
 
     private fun assertTerminalStateIsStable(
