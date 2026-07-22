@@ -6,6 +6,10 @@ import org.testng.Assert.assertTrue
 import org.testng.annotations.Test
 
 class DiagnosticRedactorTest {
+    private val bareQrServiceInstance = "synthetic-adb-pairing-B8"
+    private val bareQrPassword = "syntheticQrPass8"
+    private val bareQrPayload = "WIFI:T:ADB;S:$bareQrServiceInstance;P:$bareQrPassword;;"
+
     @Test
     fun `redacts network identity pairing code and private key`() {
         val syntheticCode = (0..5).joinToString("")
@@ -50,6 +54,69 @@ class DiagnosticRedactorTest {
         val redacted = DiagnosticRedactor.redact("qrPayload=$qrPayload")
 
         assertFalse(redacted.contains(qrPayload))
+    }
+
+    @Test
+    fun `redacts a bare wireless pairing QR payload anywhere in text`() {
+        val redacted = DiagnosticRedactor.redact("pairing material $bareQrPayload observed")
+
+        assertFalse(redacted.contains(bareQrPayload))
+    }
+
+    @Test
+    fun `redacts the service instance from a bare wireless pairing QR payload`() {
+        val redacted = DiagnosticRedactor.redact("pairing material $bareQrPayload observed")
+
+        assertFalse(redacted.contains(bareQrServiceInstance))
+    }
+
+    @Test
+    fun `redacts the password from a bare wireless pairing QR payload`() {
+        val redacted = DiagnosticRedactor.redact("pairing material $bareQrPayload observed")
+
+        assertFalse(redacted.contains(bareQrPassword))
+    }
+
+    @Test
+    fun `redacts the service instance from a QR payload in a message field`() {
+        val redacted = DiagnosticRedactor.redact("message=pairing material $bareQrPayload observed")
+
+        assertFalse(redacted.contains(bareQrServiceInstance))
+    }
+
+    @Test
+    fun `redacts the password from a QR payload in a message field`() {
+        val redacted = DiagnosticRedactor.redact("message=pairing material $bareQrPayload observed")
+
+        assertFalse(redacted.contains(bareQrPassword))
+    }
+
+    @Test
+    fun `redacts the service instance from a QR payload in an exception field`() {
+        val redacted = DiagnosticRedactor.redact("exception=pairing material $bareQrPayload observed")
+
+        assertFalse(redacted.contains(bareQrServiceInstance))
+    }
+
+    @Test
+    fun `redacts the password from a QR payload in an exception field`() {
+        val redacted = DiagnosticRedactor.redact("exception=pairing material $bareQrPayload observed")
+
+        assertFalse(redacted.contains(bareQrPassword))
+    }
+
+    @Test
+    fun `redacts the service instance from a QR payload in a context field`() {
+        val redacted = DiagnosticRedactor.redact("context=pairing material $bareQrPayload observed")
+
+        assertFalse(redacted.contains(bareQrServiceInstance))
+    }
+
+    @Test
+    fun `redacts the password from a QR payload in a context field`() {
+        val redacted = DiagnosticRedactor.redact("context=pairing material $bareQrPayload observed")
+
+        assertFalse(redacted.contains(bareQrPassword))
     }
 
     @Test
