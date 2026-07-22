@@ -149,6 +149,34 @@ class WirelessSessionManagerContractTest {
     }
 
     @Test
+    fun `synchronous source start rejections fail without publishing discovery state or hanging`() = runBlocking {
+        val expectedCodes = listOf(
+            WirelessDiscoverySourceFailure.NETWORK_UNAVAILABLE to "ADB_DISCOVERY_NETWORK_UNAVAILABLE",
+            WirelessDiscoverySourceFailure.PERMISSION_UNAVAILABLE to "ADB_DISCOVERY_PERMISSION_UNAVAILABLE",
+            WirelessDiscoverySourceFailure.RESOLUTION_FAILED to "ADB_DISCOVERY_RESOLUTION_FAILED",
+            WirelessDiscoverySourceFailure.PLATFORM_FAILURE to "ADB_DISCOVERY_PLATFORM_FAILURE",
+        )
+
+        expectedCodes.forEach { (sourceFailure, expectedCode) ->
+            val sourceFactory = FakeWirelessDiscoverySourceFactory(
+                startResult = WirelessDiscoverySourceStartResult.Rejected(sourceFailure),
+            )
+            val manager = manager(sourceFactory)
+
+            val results = withTimeout(2.seconds) {
+                manager.observeWirelessServices(WirelessDiscoveryMode.LAN_FOREGROUND, 5.seconds).toList()
+            }
+
+            assertEquals(results.size, 1)
+            assertDiscoveryFailure(results.single(), expectedCode)
+            val source = sourceFactory.awaitSource(0)
+            assertEquals(source.closeCalls.get(), 1)
+            assertEquals(sourceFactory.sources.size, 1)
+            manager.close()
+        }
+    }
+
+    @Test
     fun `a concurrent discovery is rejected without creating another source`() = runBlocking {
         val sourceFactory = FakeWirelessDiscoverySourceFactory()
         val manager = manager(sourceFactory)
@@ -242,11 +270,13 @@ class WirelessSessionManagerContractTest {
             ),
         )
 
-    private class FakeWirelessDiscoverySourceFactory : WirelessDiscoverySourceFactory {
+    private class FakeWirelessDiscoverySourceFactory(
+        private val startResult: WirelessDiscoverySourceStartResult = WirelessDiscoverySourceStartResult.Started,
+    ) : WirelessDiscoverySourceFactory {
         val sources = CopyOnWriteArrayList<FakeWirelessDiscoverySource>()
 
         override fun create(observer: WirelessDiscoverySourceObserver): WirelessDiscoverySource =
-            FakeWirelessDiscoverySource(observer).also(sources::add)
+            FakeWirelessDiscoverySource(observer, startResult).also(sources::add)
 
         suspend fun awaitSource(index: Int): FakeWirelessDiscoverySource {
             withTimeout(2.seconds) {
@@ -258,6 +288,7 @@ class WirelessSessionManagerContractTest {
 
     private class FakeWirelessDiscoverySource(
         private val observer: WirelessDiscoverySourceObserver,
+        private val startResult: WirelessDiscoverySourceStartResult,
     ) : WirelessDiscoverySource {
         @Volatile
         var request: WirelessDiscoverySourceRequest? = null
@@ -267,7 +298,7 @@ class WirelessSessionManagerContractTest {
 
         override fun start(request: WirelessDiscoverySourceRequest): WirelessDiscoverySourceStartResult {
             this.request = request
-            return WirelessDiscoverySourceStartResult.Started
+            return startResult
         }
 
         fun emit(event: WirelessDiscoveryEvent) {
