@@ -18,7 +18,10 @@ import com.sheen.adb.core.WirelessServiceObservation
 import com.sheen.adb.core.WirelessServiceStatus
 import com.sheen.adb.core.WirelessServiceType
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -115,6 +118,94 @@ class WirelessSessionManagerContractTest {
     }
 
     @Test
+    fun `timeout bounds a source factory that has not returned`() = runBlocking {
+        val createGate = BlockingGate()
+        val sourceFactory = FakeWirelessDiscoverySourceFactory(createGate = createGate)
+        val manager = manager(sourceFactory)
+        val collection = async(Dispatchers.Default) {
+            manager.observeWirelessServices(WirelessDiscoveryMode.LAN_FOREGROUND, 75.milliseconds).toList()
+        }
+        var results: List<AdbOperationResult<WirelessDiscoveryState>>? = null
+        var sourceCountWhileBlocked = -1
+
+        try {
+            assertTrue(createGate.entered.await(2, TimeUnit.SECONDS))
+            results = withTimeoutOrNull(200.milliseconds) { collection.await() }
+            sourceCountWhileBlocked = sourceFactory.sources.size
+        } finally {
+            createGate.release.countDown()
+            if (collection.isActive) withTimeout(2.seconds) { collection.cancelAndJoin() }
+            manager.close()
+        }
+
+        assertEquals(sourceCountWhileBlocked, 0)
+        assertEquals(results?.size, 1)
+        assertDiscoveryFailure(checkNotNull(results).single(), "ADB_DISCOVERY_TIMEOUT")
+    }
+
+    @Test
+    fun `timeout bounds source start and closes the attached source exactly once`() = runBlocking {
+        val startGate = BlockingGate()
+        val sourceFactory = FakeWirelessDiscoverySourceFactory(startGate = startGate)
+        val manager = manager(sourceFactory)
+        val collection = async(Dispatchers.Default) {
+            manager.observeWirelessServices(WirelessDiscoveryMode.LAN_FOREGROUND, 75.milliseconds).toList()
+        }
+        val source = sourceFactory.awaitSource(0)
+        var results: List<AdbOperationResult<WirelessDiscoveryState>>? = null
+
+        try {
+            assertTrue(startGate.entered.await(2, TimeUnit.SECONDS))
+            results = withTimeoutOrNull(200.milliseconds) { collection.await() }
+        } finally {
+            startGate.release.countDown()
+            if (collection.isActive) withTimeout(2.seconds) { collection.cancelAndJoin() }
+            manager.close()
+        }
+
+        assertEquals(results?.size, 1)
+        assertDiscoveryFailure(checkNotNull(results).single(), "ADB_DISCOVERY_TIMEOUT")
+        assertEquals(source.closeCalls.get(), 1)
+    }
+
+    @Test
+    fun `cancellation from factory create or source start is propagated without platform remapping`() = runBlocking {
+        val createCancellation = CancellationException("synthetic-create-cancelled")
+        val createFactory = FakeWirelessDiscoverySourceFactory(createFailure = createCancellation)
+        val createManager = manager(createFactory)
+        var caughtFromCreate: CancellationException? = null
+        try {
+            withTimeout(2.seconds) {
+                createManager.observeWirelessServices(WirelessDiscoveryMode.LAN_FOREGROUND, 5.seconds).toList()
+            }
+        } catch (error: CancellationException) {
+            caughtFromCreate = error
+        } finally {
+            createManager.close()
+        }
+
+        val startCancellation = CancellationException("synthetic-start-cancelled")
+        val startFactory = FakeWirelessDiscoverySourceFactory(startFailure = startCancellation)
+        val startManager = manager(startFactory)
+        var caughtFromStart: CancellationException? = null
+        try {
+            withTimeout(2.seconds) {
+                startManager.observeWirelessServices(WirelessDiscoveryMode.LAN_FOREGROUND, 5.seconds).toList()
+            }
+        } catch (error: CancellationException) {
+            caughtFromStart = error
+        } finally {
+            startManager.close()
+        }
+        val startSource = startFactory.awaitSource(0)
+
+        assertTrue(caughtFromCreate === createCancellation)
+        assertEquals(createFactory.sources.size, 0)
+        assertTrue(caughtFromStart === startCancellation)
+        assertEquals(startSource.closeCalls.get(), 1)
+    }
+
+    @Test
     fun `source failures are mapped to discovery errors without platform or endpoint details`() = runBlocking {
         val expectedCodes = listOf(
             WirelessDiscoverySourceFailure.NETWORK_UNAVAILABLE to "ADB_DISCOVERY_NETWORK_UNAVAILABLE",
@@ -200,6 +291,45 @@ class WirelessSessionManagerContractTest {
     }
 
     @Test
+    fun `discovery remains conflicting until a terminal source close finishes`() = runBlocking {
+        val closeGate = BlockingGate()
+        val sourceFactory = FakeWirelessDiscoverySourceFactory(closeGate = closeGate)
+        val manager = manager(sourceFactory)
+        val firstCollection = async(Dispatchers.Default) {
+            manager.observeWirelessServices(WirelessDiscoveryMode.LAN_FOREGROUND, 5.seconds).toList()
+        }
+        val firstSource = sourceFactory.awaitSource(0)
+        awaitCondition { firstSource.request != null }
+        val failureTrigger = async(Dispatchers.Default) {
+            firstSource.fail(WirelessDiscoverySourceFailure.PLATFORM_FAILURE)
+        }
+        assertTrue(closeGate.entered.await(2, TimeUnit.SECONDS))
+
+        val secondCollection = async(Dispatchers.Default) {
+            manager.observeWirelessServices(WirelessDiscoveryMode.LOCAL_PAIRING, 5.seconds).toList()
+        }
+        var secondResults: List<AdbOperationResult<WirelessDiscoveryState>>? = null
+        var sourceCountBeforeCloseRelease = -1
+        var firstResults: List<AdbOperationResult<WirelessDiscoveryState>>? = null
+        try {
+            secondResults = withTimeoutOrNull(200.milliseconds) { secondCollection.await() }
+            sourceCountBeforeCloseRelease = sourceFactory.sources.size
+        } finally {
+            closeGate.release.countDown()
+            withTimeout(2.seconds) { failureTrigger.await() }
+            firstResults = withTimeout(2.seconds) { firstCollection.await() }
+            if (secondCollection.isActive) withTimeout(2.seconds) { secondCollection.cancelAndJoin() }
+            manager.close()
+        }
+
+        assertEquals(secondResults?.size, 1)
+        assertDiscoveryFailure(checkNotNull(secondResults).single(), "ADB_DISCOVERY_CONFLICT")
+        assertEquals(sourceCountBeforeCloseRelease, 1)
+        assertTrue(checkNotNull(firstResults).last() is AdbOperationResult.Failure)
+        assertEquals(firstSource.closeCalls.get(), 1)
+    }
+
+    @Test
     fun `manager close terminalizes discovery closes source and discards late callback`() = runBlocking {
         val sourceFactory = FakeWirelessDiscoverySourceFactory()
         val manager = manager(sourceFactory)
@@ -272,11 +402,25 @@ class WirelessSessionManagerContractTest {
 
     private class FakeWirelessDiscoverySourceFactory(
         private val startResult: WirelessDiscoverySourceStartResult = WirelessDiscoverySourceStartResult.Started,
+        private val createGate: BlockingGate? = null,
+        private val startGate: BlockingGate? = null,
+        private val closeGate: BlockingGate? = null,
+        private val createFailure: Throwable? = null,
+        private val startFailure: Throwable? = null,
     ) : WirelessDiscoverySourceFactory {
         val sources = CopyOnWriteArrayList<FakeWirelessDiscoverySource>()
 
-        override fun create(observer: WirelessDiscoverySourceObserver): WirelessDiscoverySource =
-            FakeWirelessDiscoverySource(observer, startResult).also(sources::add)
+        override fun create(observer: WirelessDiscoverySourceObserver): WirelessDiscoverySource {
+            createGate?.awaitRelease()
+            createFailure?.let { throw it }
+            return FakeWirelessDiscoverySource(
+                observer = observer,
+                startResult = startResult,
+                startGate = startGate,
+                closeGate = closeGate,
+                startFailure = startFailure,
+            ).also(sources::add)
+        }
 
         suspend fun awaitSource(index: Int): FakeWirelessDiscoverySource {
             withTimeout(2.seconds) {
@@ -289,6 +433,9 @@ class WirelessSessionManagerContractTest {
     private class FakeWirelessDiscoverySource(
         private val observer: WirelessDiscoverySourceObserver,
         private val startResult: WirelessDiscoverySourceStartResult,
+        private val startGate: BlockingGate?,
+        private val closeGate: BlockingGate?,
+        private val startFailure: Throwable?,
     ) : WirelessDiscoverySource {
         @Volatile
         var request: WirelessDiscoverySourceRequest? = null
@@ -297,6 +444,8 @@ class WirelessSessionManagerContractTest {
 
         override fun start(request: WirelessDiscoverySourceRequest): WirelessDiscoverySourceStartResult {
             this.request = request
+            startGate?.awaitRelease()
+            startFailure?.let { throw it }
             return startResult
         }
 
@@ -310,6 +459,17 @@ class WirelessSessionManagerContractTest {
 
         override fun close() {
             closeCalls.incrementAndGet()
+            closeGate?.awaitRelease()
+        }
+    }
+
+    private class BlockingGate {
+        val entered = CountDownLatch(1)
+        val release = CountDownLatch(1)
+
+        fun awaitRelease() {
+            entered.countDown()
+            release.await()
         }
     }
 
