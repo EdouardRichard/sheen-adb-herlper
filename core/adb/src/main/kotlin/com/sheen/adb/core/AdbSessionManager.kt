@@ -64,6 +64,16 @@ interface AdbSessionManager : AutoCloseable {
         timeout: Duration = 30.seconds,
     ): AdbOperationResult<Unit>
 
+    suspend fun pairWithSecret(
+        pairingEndpoint: AdbEndpoint,
+        pairingSecret: PairingSecret,
+        method: PairingMethod,
+        timeout: Duration = 30.seconds,
+    ): AdbOperationResult<Unit> {
+        pairingSecret.clear()
+        return AdbOperationResult.Failure(AdbError.PairingUnsupported)
+    }
+
     suspend fun executeShell(
         command: String,
         timeout: Duration = 30.seconds,

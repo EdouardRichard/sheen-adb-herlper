@@ -306,6 +306,20 @@ sealed interface AdbError {
         override val technicalCode = "ADB_IO_FAILURE"
     }
 
+    data object PairingUnsupported : AdbError {
+        override val stage = AdbOperationStage.PAIR
+        override val userMessage = "当前配对方式不可用。"
+        override val nextStep = "请改用六位配对码，或重新打开系统无线调试配对页面。"
+        override val technicalCode = "ADB_PAIR_UNSUPPORTED"
+    }
+
+    data object PairingSessionConflict : AdbError {
+        override val stage = AdbOperationStage.PAIR
+        override val userMessage = "已有设备保持连接，不能直接开始新的配对。"
+        override val nextStep = "请先确认并断开当前设备，再重新开始配对。"
+        override val technicalCode = "ADB_PAIR_SESSION_CONFLICT"
+    }
+
     data object ApplicationCurrentUserUnavailable : AdbError {
         override val stage = AdbOperationStage.APPLICATIONS_LIST
         override val userMessage = "无法确认被控端当前 Android 用户。"
