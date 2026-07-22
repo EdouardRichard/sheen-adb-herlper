@@ -11,6 +11,12 @@ import android.os.Handler
 import android.os.Looper
 import com.sheen.adb.core.WirelessAddress
 import com.sheen.adb.core.WirelessDiscoveryEvent
+import com.sheen.adb.core.WirelessDiscoverySource
+import com.sheen.adb.core.WirelessDiscoverySourceFactory
+import com.sheen.adb.core.WirelessDiscoverySourceFailure
+import com.sheen.adb.core.WirelessDiscoverySourceObserver
+import com.sheen.adb.core.WirelessDiscoverySourceRequest
+import com.sheen.adb.core.WirelessDiscoverySourceStartResult
 import com.sheen.adb.core.WirelessObservationId
 import com.sheen.adb.core.WirelessServiceObservation
 import com.sheen.adb.core.WirelessServiceStatus
@@ -19,6 +25,77 @@ import java.net.Inet4Address
 import java.net.Inet6Address
 import java.net.InetAddress
 import java.util.concurrent.Executor
+
+internal class AndroidNsdWirelessDiscoverySourceFactory(context: Context) : WirelessDiscoverySourceFactory {
+    private val applicationContext = context.applicationContext
+
+    override fun create(observer: WirelessDiscoverySourceObserver): WirelessDiscoverySource =
+        AndroidNsdWirelessDiscoverySource(applicationContext, observer)
+}
+
+private class AndroidNsdWirelessDiscoverySource(
+    private val applicationContext: Context,
+    private val observer: WirelessDiscoverySourceObserver,
+) : WirelessDiscoverySource {
+    private val monitor = Any()
+    private var adapter: AndroidNsdDiscoveryAdapter? = null
+    private var gateway: AndroidNsdDiscoveryPlatformGateway? = null
+    private var closed = false
+
+    override fun start(request: WirelessDiscoverySourceRequest): WirelessDiscoverySourceStartResult =
+        synchronized(monitor) {
+            if (closed) {
+                return@synchronized WirelessDiscoverySourceStartResult.Rejected(
+                    WirelessDiscoverySourceFailure.PLATFORM_FAILURE,
+                )
+            }
+            try {
+                val platform = gateway ?: AndroidNsdDiscoveryPlatformGateway(applicationContext).also { gateway = it }
+                val activeAdapter = adapter ?: AndroidNsdDiscoveryAdapter(
+                    platform = platform,
+                    policy = NsdDiscoveryPolicy(),
+                    scheduler = AndroidNsdScheduler(),
+                    observer = object : NsdDiscoveryObserver {
+                        override fun onEvent(event: WirelessDiscoveryEvent) = observer.onEvent(event)
+
+                        override fun onFailure(failure: NsdDiscoveryFailure) {
+                            observer.onFailure(failure.toSourceFailure())
+                        }
+                    },
+                ).also { adapter = it }
+                activeAdapter.start(
+                    NsdDiscoveryRequest(
+                        generation = request.generation,
+                        apiLevel = Build.VERSION.SDK_INT,
+                        currentNetwork = platform.currentNetwork(),
+                    ),
+                ).toSourceResult()
+            } catch (_: Exception) {
+                WirelessDiscoverySourceStartResult.Rejected(WirelessDiscoverySourceFailure.PLATFORM_FAILURE)
+            }
+        }
+
+    override fun close() = synchronized(monitor) {
+        if (closed) return@synchronized
+        closed = true
+        adapter?.close()
+        adapter = null
+        gateway = null
+    }
+
+    private fun NsdDiscoveryStartResult.toSourceResult(): WirelessDiscoverySourceStartResult = when (this) {
+        NsdDiscoveryStartResult.Started -> WirelessDiscoverySourceStartResult.Started
+        is NsdDiscoveryStartResult.Rejected -> WirelessDiscoverySourceStartResult.Rejected(failure.toSourceFailure())
+    }
+
+    private fun NsdDiscoveryFailure.toSourceFailure(): WirelessDiscoverySourceFailure = when (this) {
+        NsdDiscoveryFailure.NETWORK_UNAVAILABLE -> WirelessDiscoverySourceFailure.NETWORK_UNAVAILABLE
+        NsdDiscoveryFailure.PLATFORM_RESOLVE_FAILED -> WirelessDiscoverySourceFailure.RESOLUTION_FAILED
+        NsdDiscoveryFailure.PLATFORM_DISCOVERY_FAILED,
+        NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED,
+        -> WirelessDiscoverySourceFailure.PLATFORM_FAILURE
+    }
+}
 
 class AndroidNsdDiscoveryAdapter(
     private val platform: NsdDiscoveryPlatformGateway,
