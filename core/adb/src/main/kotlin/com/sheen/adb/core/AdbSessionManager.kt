@@ -8,19 +8,19 @@ import java.io.OutputStream
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-data class WirelessDiscoverySourceRequest(
+internal data class WirelessDiscoverySourceRequest(
     val generation: Long,
     val mode: WirelessDiscoveryMode,
 )
 
-enum class WirelessDiscoverySourceFailure {
+internal enum class WirelessDiscoverySourceFailure {
     NETWORK_UNAVAILABLE,
     PERMISSION_UNAVAILABLE,
     RESOLUTION_FAILED,
     PLATFORM_FAILURE,
 }
 
-sealed interface WirelessDiscoverySourceStartResult {
+internal sealed interface WirelessDiscoverySourceStartResult {
     data object Started : WirelessDiscoverySourceStartResult
 
     data class Rejected(
@@ -28,19 +28,19 @@ sealed interface WirelessDiscoverySourceStartResult {
     ) : WirelessDiscoverySourceStartResult
 }
 
-interface WirelessDiscoverySourceObserver {
+internal interface WirelessDiscoverySourceObserver {
     fun onEvent(event: WirelessDiscoveryEvent)
 
     fun onFailure(failure: WirelessDiscoverySourceFailure)
 }
 
-interface WirelessDiscoverySource : AutoCloseable {
+internal interface WirelessDiscoverySource : AutoCloseable {
     fun start(request: WirelessDiscoverySourceRequest): WirelessDiscoverySourceStartResult
 
     override fun close()
 }
 
-fun interface WirelessDiscoverySourceFactory {
+internal fun interface WirelessDiscoverySourceFactory {
     fun create(observer: WirelessDiscoverySourceObserver): WirelessDiscoverySource
 }
 
