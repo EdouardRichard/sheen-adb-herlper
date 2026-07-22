@@ -2,6 +2,7 @@ package com.sheen.adb.core.internal.discovery
 
 import com.sheen.adb.core.WirelessAddress
 import com.sheen.adb.core.WirelessDiscoveryEvent
+import java.util.Collections
 
 data class NsdDiscoveryRequest(
     val generation: Long,
@@ -17,29 +18,65 @@ data class NsdNetworkRef(val value: String) {
     override fun toString(): String = "NsdNetworkRef(redacted)"
 }
 
-data class NsdServiceRef(
-    val serviceType: String,
+class NsdServiceRef(
+    serviceType: String,
     val serviceName: String,
 ) {
+    val serviceType: String = serviceType.canonicalDnsSdType()
+
     init {
-        require(serviceType in NsdDiscoveryPolicy.APPROVED_SERVICE_TYPES) { "Unsupported NSD service type." }
+        require(this.serviceType in NsdDiscoveryPolicy.APPROVED_SERVICE_TYPES) { "Unsupported NSD service type." }
         require(serviceName.isNotBlank()) { "Service reference must not be blank." }
     }
+
+    fun copy(
+        serviceType: String = this.serviceType,
+        serviceName: String = this.serviceName,
+    ): NsdServiceRef = NsdServiceRef(serviceType, serviceName)
+
+    override fun equals(other: Any?): Boolean =
+        other is NsdServiceRef && serviceType == other.serviceType && serviceName == other.serviceName
+
+    override fun hashCode(): Int = 31 * serviceType.hashCode() + serviceName.hashCode()
 
     override fun toString(): String = "NsdServiceRef(redacted)"
 }
 
-data class NsdResolvedService(
+class NsdResolvedService(
     val service: NsdServiceRef,
     val port: Int,
     val primaryAddress: WirelessAddress,
-    val allAddresses: List<WirelessAddress>,
+    allAddresses: List<WirelessAddress>,
 ) {
+    val allAddresses: List<WirelessAddress> = Collections.unmodifiableList(allAddresses.toList())
+
     init {
         require(port in 1..65535) { "Resolved service port must be valid." }
-        require(allAddresses.isNotEmpty() && primaryAddress in allAddresses) {
+        require(this.allAddresses.isNotEmpty() && primaryAddress in this.allAddresses) {
             "Resolved service requires its primary address."
         }
+    }
+
+    fun copy(
+        service: NsdServiceRef = this.service,
+        port: Int = this.port,
+        primaryAddress: WirelessAddress = this.primaryAddress,
+        allAddresses: List<WirelessAddress> = this.allAddresses,
+    ): NsdResolvedService = NsdResolvedService(service, port, primaryAddress, allAddresses)
+
+    override fun equals(other: Any?): Boolean =
+        other is NsdResolvedService &&
+            service == other.service &&
+            port == other.port &&
+            primaryAddress == other.primaryAddress &&
+            allAddresses == other.allAddresses
+
+    override fun hashCode(): Int {
+        var result = service.hashCode()
+        result = 31 * result + port
+        result = 31 * result + primaryAddress.hashCode()
+        result = 31 * result + allAddresses.hashCode()
+        return result
     }
 
     override fun toString(): String = "NsdResolvedService(redacted)"
@@ -151,3 +188,6 @@ data class NsdDiscoveryDecision(
     val observeNetworkChanges: Boolean,
     val publishAllAddresses: Boolean,
 )
+
+private fun String.canonicalDnsSdType(): String =
+    if (endsWith('.') && !endsWith("..")) dropLast(1) else this

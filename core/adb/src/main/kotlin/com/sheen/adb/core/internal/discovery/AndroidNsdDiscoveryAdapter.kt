@@ -38,22 +38,27 @@ class AndroidNsdDiscoveryAdapter(
         active = session
 
         try {
-            if (decision.acquireMulticastLock) session.track(platform.acquireMulticastLock())
+            if (decision.acquireMulticastLock) {
+                session.track(platform.acquireMulticastLock())
+                if (!isActive(session)) return rejectedTerminal(session)
+            }
             if (decision.observeNetworkChanges) {
                 session.track(platform.registerNetworkChangeCallback(requireNotNull(decision.network), networkCallbacks(session)))
+                if (!isActive(session)) return rejectedTerminal(session)
             }
-            NsdDiscoveryPolicy.APPROVED_SERVICE_TYPES.forEach { serviceType ->
+            for (serviceType in NsdDiscoveryPolicy.APPROVED_SERVICE_TYPES) {
                 session.track(platform.discover(serviceType, decision.network, discoveryCallbacks(session, serviceType)))
+                if (!isActive(session)) return rejectedTerminal(session)
             }
             session.track(
                 scheduler.schedule(NsdDiscoveryPolicy.DEFAULT_LAN_DISCOVERY_CUTOFF_MILLIS) {
                     synchronized(monitor) { if (isActive(session)) end(session) }
                 },
             )
-            NsdDiscoveryStartResult.Started
+            if (isActive(session)) NsdDiscoveryStartResult.Started else rejectedTerminal(session)
         } catch (_: Exception) {
             end(session)
-            NsdDiscoveryStartResult.Rejected(NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED)
+            rejectedTerminal(session)
         }
     }
 
@@ -122,6 +127,8 @@ class AndroidNsdDiscoveryAdapter(
     }
 
     private fun fail(session: ActiveDiscovery, failure: NsdDiscoveryFailure) {
+        if (session.ended) return
+        session.terminalFailure = failure
         end(session)
         try {
             observer.onFailure(failure)
@@ -139,6 +146,9 @@ class AndroidNsdDiscoveryAdapter(
     }
 
     private fun isActive(session: ActiveDiscovery): Boolean = active === session && !session.ended
+
+    private fun rejectedTerminal(session: ActiveDiscovery): NsdDiscoveryStartResult.Rejected =
+        NsdDiscoveryStartResult.Rejected(session.terminalFailure ?: NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED)
 
     private fun end(session: ActiveDiscovery?) {
         if (session == null || session.ended) return
@@ -160,6 +170,7 @@ class AndroidNsdDiscoveryAdapter(
         val resources = mutableListOf<NsdPlatformResource>()
         private val observationIds = mutableMapOf<ObservationKey, WirelessObservationId>()
         var ended = false
+        var terminalFailure: NsdDiscoveryFailure? = null
         var nextObservationId = 0
 
         fun observationIdFor(service: NsdServiceRef): WirelessObservationId = observationIds.getOrPut(
@@ -352,8 +363,8 @@ internal class AndroidNsdDiscoveryPlatformGateway(
     }
 
     private fun NsdServiceInfo.toServiceRef(expectedType: String): NsdServiceRef? = try {
-        if (serviceType != expectedType || serviceName.isNullOrBlank()) null
-        else NsdServiceRef(expectedType, serviceName)
+        if (serviceName.isNullOrBlank()) null
+        else NsdServiceRef(serviceType, serviceName).takeIf { it.serviceType == expectedType }
     } catch (_: Exception) {
         null
     }
