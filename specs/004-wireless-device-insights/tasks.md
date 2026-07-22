@@ -61,11 +61,11 @@
   - **验收**: T013 从“契约缺失”推进到仅因默认 manager 未实现而失败；新增 `AdbOperationStage.DISCOVERY`、不含端点/平台异常原文的结构化发现错误及项目自有 discovery source/coordinator 契约，公开 API 不暴露 `NsdManager`、`NsdServiceInfo`、Kadb、Socket 或原始命令。
 - [X] T014A 将 discovery coordinator 接入默认 manager 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
   - **验收**: T013 及既有 manager 测试通过；同一时间只允许一个活动发现，所有结果带 generation/session guard，取消、超时、Session 变化、并发拒绝和 `close()` 均产生确定终态并清理 source。
-- [ ] T015 先写 Android discovery factory 失败测试，覆盖 application Context 注入、单例 manager、adapter close、不保存 Activity 引用、取消/中断传播、权限映射、网络变化终态和 callback/close 锁序于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/WirelessDiscoveryFactoryTest.kt`
+- [X] T015 先写 Android discovery factory 失败测试，覆盖 application Context 注入、单例 manager、adapter close、不保存 Activity 引用、取消/中断传播、权限映射、网络变化终态和 callback/close 锁序于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/WirelessDiscoveryFactoryTest.kt`
   - **验收**: 目标测试因 provider 尚未装配 Android adapter 或平台生命周期不完整而失败；测试验证同一进程仍只有一个 manager，控制流异常不转成平台失败，close/callback 无锁反转且所有并发等待有界清理。
-- [ ] T016 将 Android NSD adapter 装配到唯一 manager 于 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbManagerProvider.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/AndroidNsdDiscoveryAdapter.kt`
+- [X] T016 将 Android NSD adapter 装配到唯一 manager 于 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbManagerProvider.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/AndroidNsdDiscoveryAdapter.kt`
   - **验收**: T015 与 `:core:adb:testDebugUnitTest` 全部通过；只持有 application Context，manager `close()` 可确定性释放 discovery 资源。
-- [ ] T016B 为异步 resolve 权限拒绝补充内部 failure 与资源终态于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/NsdDiscoveryPolicy.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/AndroidNsdDiscoveryAdapter.kt`
+- [X] T016B 为异步 resolve 权限拒绝补充内部 failure 与资源终态于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/NsdDiscoveryPolicy.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/AndroidNsdDiscoveryAdapter.kt`
   - **验收**: discovery 启动后 `resolve` 抛出的 `SecurityException` 不逃出 callback，单次映射为 `PERMISSION_UNAVAILABLE` 并释放全部 discovery/resolve/network/lock/timeout 资源；T015、T007、T013 与 `:core:adb:testDebugUnitTest` 全部通过。
 
 **Checkpoint**: Foundation ready。无线发现与配对基础只存在于 `:core:adb`，Feature/App 只能消费项目自有类型。
