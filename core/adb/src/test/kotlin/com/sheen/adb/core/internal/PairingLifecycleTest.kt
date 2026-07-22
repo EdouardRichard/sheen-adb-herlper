@@ -36,6 +36,22 @@ class PairingLifecycleTest {
         assertEquals(action.calls, listOf(PairingCall(PairingMethod.QR, wasExpectedAndNonCleared = true)))
         assertCleared(password)
         assertTrue(action.expectedSourceIsCleared())
+        val lateCode = "012345".toCharArray()
+        val restartedSecret = "restart-secret-synthetic".toCharArray()
+        val lateAwait = lifecycle.awaitTarget(attemptId)
+        val lateTarget = lifecycle.onTargetReady(attemptId)
+        val lateSubmit = lifecycle.submitCode(attemptId, lateCode)
+        val restart = lifecycle.startQr(attemptId, PairingSecret(restartedSecret), deadlineMillis = 20)
+
+        assertEquals(lateAwait.state, success.state)
+        assertEquals(lateTarget.state, success.state)
+        assertEquals(lateSubmit.state, success.state)
+        assertEquals(lateSubmit.rejection, PairingCommandRejection.TERMINAL_ATTEMPT)
+        assertEquals(restart.state, success.state)
+        assertEquals(restart.rejection, PairingCommandRejection.ATTEMPT_ID_REUSED)
+        assertCleared(lateCode)
+        assertCleared(restartedSecret)
+        assertSafeRendering(success, lateSubmit, "attempt-synthetic-qr", "qr-password-synthetic")
     }
 
     @Test
@@ -104,6 +120,11 @@ class PairingLifecycleTest {
         assertFalse(id.toString().contains(token))
         assertFalse(secret.toString().contains("secret-synthetic"))
         assertFalse(runCatching { PairingAttemptId.of("   ") }.isSuccess)
+        assertTrue(
+            PairingSecret::class.java.methods.none { method ->
+                method.declaringClass == PairingSecret::class.java && method.returnType == CharArray::class.java
+            },
+        )
     }
 
     @Test
@@ -317,6 +338,7 @@ class PairingLifecycleTest {
 
         assertEquals(expiry.state.phase, PairingAttemptPhase.EXPIRED)
         assertCleared(expiredPassword)
+        assertSafeRendering(expiry, expiry, "attempt-synthetic-render-expired", "expiry-secret-synthetic")
     }
 
     private fun assertSafeRendering(
