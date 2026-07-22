@@ -57,7 +57,9 @@ class WirelessDiscoveryFactoryTest {
                 "A closed Android discovery source must reject restart",
             )
         } finally {
+            if (fromApplication !== fromActivity) fromApplication.close()
             fromActivity.close()
+            resetProvider()
             directory.deleteRecursively()
         }
     }
@@ -71,6 +73,15 @@ class WirelessDiscoveryFactoryTest {
     private fun contextFields(instance: Any): List<Context> = instance.javaClass.declaredFields.mapNotNull { field ->
         field.isAccessible = true
         field.get(instance) as? Context
+    }
+
+    private fun resetProvider() {
+        runCatching {
+            AdbManagerProvider::class.java.getDeclaredField("manager").run {
+                isAccessible = true
+                set(AdbManagerProvider, null)
+            }
+        }
     }
 
     private inline fun <reified T> allocate(): T = unsafe.allocateInstance(T::class.java) as T
