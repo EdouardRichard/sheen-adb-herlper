@@ -20,6 +20,7 @@ internal class QrPairingCoordinator(
 
     fun start(attemptId: PairingAttemptId): QrPairingMaterial = synchronized(lock) {
         check(!closed) { "QR pairing coordinator is closed." }
+        current?.let(::expireIfDeadlineReached)
         check(attemptId !in usedAttemptIds) { "QR pairing attempt ID was already used." }
         check(current?.phase?.isTerminal() != false) { "A QR pairing attempt is already active." }
 
@@ -48,10 +49,7 @@ internal class QrPairingCoordinator(
     ): QrPairingMatch? = synchronized(lock) {
         val attempt = current?.takeIf { it.attemptId == attemptId } ?: return@synchronized null
         if (attempt.phase.isTerminal()) return@synchronized null
-        if (clock.nowMillis() >= attempt.material.deadlineMillis) {
-            finish(attempt, PairingAttemptPhase.EXPIRED)
-            return@synchronized null
-        }
+        if (expireIfDeadlineReached(attempt)) return@synchronized null
         if (attempt.phase != PairingAttemptPhase.WAITING_FOR_TARGET ||
             observation.serviceType != WirelessServiceType.PAIRING ||
             observation.status != WirelessServiceStatus.RESOLVED ||
@@ -73,13 +71,20 @@ internal class QrPairingCoordinator(
         phase: PairingAttemptPhase,
     ): Boolean = synchronized(lock) {
         val attempt = current?.takeIf { it.attemptId == attemptId } ?: return@synchronized false
-        if (attempt.phase.isTerminal() || !attempt.acceptsCompletion(phase)) return@synchronized false
+        if (attempt.phase.isTerminal()) return@synchronized false
+        if (phase == PairingAttemptPhase.EXPIRED) {
+            finish(attempt, phase)
+            return@synchronized true
+        }
+        if (expireIfDeadlineReached(attempt) || !attempt.acceptsCompletion(phase)) return@synchronized false
         finish(attempt, phase)
         true
     }
 
     fun state(attemptId: PairingAttemptId): PairingAttemptPhase? = synchronized(lock) {
-        current?.takeIf { it.attemptId == attemptId }?.phase
+        val attempt = current?.takeIf { it.attemptId == attemptId } ?: return@synchronized null
+        expireIfDeadlineReached(attempt)
+        attempt.phase
     }
 
     override fun close() = synchronized(lock) {
@@ -93,6 +98,12 @@ internal class QrPairingCoordinator(
     private fun finish(attempt: ActiveQrAttempt, phase: PairingAttemptPhase) {
         attempt.phase = phase
         attempt.material.invalidate()
+    }
+
+    private fun expireIfDeadlineReached(attempt: ActiveQrAttempt): Boolean {
+        if (attempt.phase.isTerminal() || clock.nowMillis() < attempt.material.deadlineMillis) return false
+        finish(attempt, PairingAttemptPhase.EXPIRED)
+        return true
     }
 
     private fun randomChars(length: Int, alphabet: String): CharArray {
@@ -120,9 +131,9 @@ internal class QrPairingCoordinator(
 
     private fun ActiveQrAttempt.acceptsCompletion(phase: PairingAttemptPhase): Boolean = when (phase) {
         PairingAttemptPhase.SUCCEEDED,
-        PairingAttemptPhase.FAILED,
         -> this.phase == PairingAttemptPhase.PAIRING
 
+        PairingAttemptPhase.FAILED,
         PairingAttemptPhase.CANCELLED,
         PairingAttemptPhase.UNSUPPORTED,
         -> true
@@ -155,14 +166,18 @@ internal class QrPairingCoordinator(
 
 internal class QrPairingMaterial(
     val attemptId: PairingAttemptId,
-    val serviceInstance: String,
+    serviceInstance: String,
     val deadlineMillis: Long,
     private val password: CharArray,
 ) {
     private val lock = Any()
     private val pairingSecretReference = PairingSecret(password)
     private var active = true
+    private var serviceInstanceReference: String? = serviceInstance
     private var payloadReference: String? = buildPayload(serviceInstance, password)
+
+    val serviceInstance: String?
+        get() = synchronized(lock) { serviceInstanceReference }
 
     val payload: String?
         get() = synchronized(lock) { payloadReference }
@@ -177,6 +192,7 @@ internal class QrPairingMaterial(
         if (!active) return@synchronized
         active = false
         pairingSecretReference.clear()
+        serviceInstanceReference = null
         payloadReference = null
     }
 
