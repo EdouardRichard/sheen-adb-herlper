@@ -279,7 +279,9 @@ internal class DefaultAdbSessionManager(
                         }
                         val sourceResult = try {
                             runInterruptible(ioDispatcher) {
-                                captureWirelessDiscoveryCall { factory.create(observer) }
+                                captureWirelessDiscoveryCall {
+                                    factory.create(observer).also(discovery::attachSource)
+                                }
                             }
                         } catch (error: CancellationException) {
                             discovery.markSourceUnavailable()
@@ -300,7 +302,6 @@ internal class DefaultAdbSessionManager(
                             }
                         }
                         if (source != null) {
-                            discovery.attachSource(source)
                             completePendingWirelessDiscovery(discovery)
                             if (!discovery.isTerminal()) {
                                 val startCallResult = try {
