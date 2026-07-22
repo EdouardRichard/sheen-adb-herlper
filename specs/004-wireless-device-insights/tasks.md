@@ -28,7 +28,7 @@
   - **验收**: version catalog 可由 Gradle 解析且版本精确固定；merged Manifest 已包含两项权限且不包含位置、Nearby、相机或存储权限；apk-parser 仅在 T001 静态供应链门禁通过后登记，动态门禁通过前 US4 仍为 BLOCKED。
 - [X] T003 [P] 将 ZXing core 以 implementation 方式接入 `feature/devices/build.gradle.kts`
   - **验收**: `:feature:devices:dependencies` 只出现 `com.google.zxing:core`，不出现 ZXing Android scanner、camera integration 或 JavaSE artifact，模块可完成 Debug Kotlin 编译。
-- [ ] T004 [P] 在 T001 静态供应链门禁通过后，将 APK parser 以隔离 implementation 方式接入并排除未批准可选依赖于 `core/adb/build.gradle.kts`
+- [X] T004 [P] 在 T001 静态供应链门禁通过后，将 APK parser 以隔离 implementation 方式接入并排除未批准可选依赖于 `core/adb/build.gradle.kts`
   - **验收**: `:core:adb:dependencies` 的运行时图与 T001 记录一致且不新增白名单外许可证；该接线只授权后续恶意 ZIP/API 30 验证，动态门禁实际通过前 US4 保持 BLOCKED，不能静默降级为仅包名交付。
 
 **Checkpoint**: 新依赖均有可追溯审查；依赖门禁未通过时不会被构建脚本绕过。
