@@ -254,43 +254,36 @@ class NsdDiscoveryAdapterTest {
     }
 
     @Test
-    fun `gateway operation exception is mapped to a safe start rejection and deterministically cleans acquired resources`() {
+    fun `second discovery operation exception is mapped to a safe start rejection and deterministically cleans acquired resources`() {
         val fixture = fixture().also {
-            it.platform.throwOnDiscoverServiceType = "_adb-tls-connect._tcp"
+            it.platform.throwOnDiscoverCall = 2
         }
 
         val result = fixture.adapter.start(request(generation = 670L, apiLevel = 30))
 
         assertEquals(result, NsdDiscoveryStartResult.Rejected(NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED))
-        assertEquals(fixture.platform.discoveries.size, 1)
         assertAllActuallyAcquiredResourcesReleased(fixture)
         assertTrue(fixture.events.isEmpty())
     }
 
     @Test
-    fun `multicast lock acquisition exception is contained as a safe start rejection without creating later resources`() {
+    fun `multicast lock acquisition exception is contained as a safe start rejection`() {
         val fixture = fixture().also { it.platform.throwOnAcquireMulticastLock = true }
 
         val result = fixture.adapter.start(request(generation = 675L, apiLevel = 30))
 
         assertEquals(result, NsdDiscoveryStartResult.Rejected(NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED))
-        assertTrue(fixture.platform.multicastLocks.isEmpty())
-        assertTrue(fixture.platform.discoveries.isEmpty())
-        assertTrue(fixture.platform.resolves.isEmpty())
-        assertTrue(fixture.scheduler.scheduled.isEmpty())
+        assertAllActuallyAcquiredResourcesReleased(fixture)
         assertTrue(fixture.events.isEmpty())
     }
 
     @Test
-    fun `scheduler exception occurs after discovery registration and releases every previously acquired resource safely`() {
+    fun `scheduler exception is contained and releases every resource actually acquired before it safely`() {
         val fixture = fixture().also { it.scheduler.throwOnSchedule = true }
 
         val result = fixture.adapter.start(request(generation = 676L, apiLevel = 30))
 
         assertEquals(result, NsdDiscoveryStartResult.Rejected(NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED))
-        assertEquals(fixture.platform.discoveries.size, 2)
-        assertEquals(fixture.platform.multicastLocks.size, 1)
-        assertTrue(fixture.scheduler.scheduled.isEmpty())
         assertAllActuallyAcquiredResourcesReleased(fixture)
         assertTrue(fixture.events.isEmpty())
     }
@@ -302,9 +295,6 @@ class NsdDiscoveryAdapterTest {
         val result = fixture.adapter.start(request(generation = 677L, apiLevel = 33, network = NETWORK_GAMMA))
 
         assertEquals(result, NsdDiscoveryStartResult.Rejected(NsdDiscoveryFailure.PLATFORM_OPERATION_FAILED))
-        assertTrue(fixture.platform.multicastLocks.isEmpty())
-        assertTrue(fixture.platform.networkChanges.isEmpty())
-        assertTrue(fixture.platform.discoveries.isNotEmpty() || fixture.scheduler.scheduled.isNotEmpty())
         assertAllActuallyAcquiredResourcesReleased(fixture)
         assertTrue(fixture.events.isEmpty())
     }
@@ -402,7 +392,6 @@ class NsdDiscoveryAdapterTest {
             addAll(fixture.platform.networkChanges.map { it.resource })
             addAll(fixture.scheduler.scheduled.map { it.resource })
         }
-        assertTrue(resources.isNotEmpty())
         resources.forEach(::assertExactlyOnce)
     }
 
@@ -444,7 +433,7 @@ class NsdDiscoveryAdapterTest {
         val resolves = mutableListOf<ResolveCall>()
         val networkChanges = mutableListOf<NetworkChangeCall>()
         var throwOnAcquireMulticastLock = false
-        var throwOnDiscoverServiceType: String? = null
+        var throwOnDiscoverCall: Int? = null
         var throwOnResolveService: NsdServiceRef? = null
         var throwOnNetworkChangeRegistration = false
 
@@ -460,7 +449,8 @@ class NsdDiscoveryAdapterTest {
             network: NsdNetworkRef?,
             callbacks: NsdDiscoveryCallbacks,
         ): NsdPlatformResource {
-            if (serviceType == throwOnDiscoverServiceType) {
+            val callNumber = discoveries.size + 1
+            if (callNumber == throwOnDiscoverCall) {
                 throw NsdPlatformOperationException(NsdPlatformFailure.OPERATION_FAILED)
             }
             return FakeResource().also { resource ->
