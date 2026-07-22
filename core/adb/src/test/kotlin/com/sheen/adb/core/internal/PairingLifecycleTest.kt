@@ -11,6 +11,7 @@ import com.sheen.adb.core.internal.pairing.MonotonicClock
 import com.sheen.adb.core.internal.pairing.PairingAction
 import com.sheen.adb.core.internal.pairing.PairingLifecycle
 import java.lang.reflect.Modifier
+import java.util.concurrent.CancellationException
 import org.testng.Assert.assertEquals
 import org.testng.Assert.assertFalse
 import org.testng.Assert.assertNull
@@ -346,6 +347,180 @@ class PairingLifecycleTest {
         assertSafeRendering(expiry, expiry, "attempt-synthetic-render-expired", "expiry-secret-synthetic")
     }
 
+    @Test
+    fun `QR action cancellation is rethrown clears retained secret and atomically cancels attempt`() {
+        val password = "qr-cancel-secret-synthetic".toCharArray()
+        val action = FakePairingAction(
+            expectedSecret = password,
+            throwable = CancellationException("qr-cancellation-synthetic"),
+        )
+        val lifecycle = PairingLifecycle(FakeClock(), action)
+        val cancelledId = attemptId("qr-cancelled")
+        lifecycle.startQr(cancelledId, PairingSecret(password), deadlineMillis = 20)
+        lifecycle.awaitTarget(cancelledId)
+
+        val thrown = runCatching { lifecycle.onTargetReady(cancelledId) }.exceptionOrNull()
+        val cancelled = lifecycle.awaitTarget(cancelledId)
+        val nextId = attemptId("after-qr-cancel")
+        val next = lifecycle.startSixDigit(nextId, deadlineMillis = 20)
+
+        assertTrue(thrown is CancellationException)
+        assertCleared(password)
+        assertTrue(action.expectedSourceIsCleared())
+        assertEquals(cancelled.state.phase, PairingAttemptPhase.CANCELLED)
+        assertEquals(cancelled.state.failure, PairingFailure.CANCELLED)
+        assertEquals(cancelled.rejection, PairingCommandRejection.TERMINAL_ATTEMPT)
+        assertEquals(next.state.phase, PairingAttemptPhase.WAITING_FOR_CODE)
+        assertNull(next.rejection)
+        lifecycle.cancel(nextId)
+    }
+
+    @Test
+    fun `code action cancellation is rethrown clears supplied code and atomically cancels attempt`() {
+        val code = "012345".toCharArray()
+        val action = FakePairingAction(
+            expectedSecret = code,
+            throwable = CancellationException("code-cancellation-synthetic"),
+        )
+        val lifecycle = PairingLifecycle(FakeClock(), action)
+        val cancelledId = attemptId("code-cancelled")
+        lifecycle.startSixDigit(cancelledId, deadlineMillis = 20)
+
+        val thrown = runCatching { lifecycle.submitCode(cancelledId, code) }.exceptionOrNull()
+        val cancelled = lifecycle.awaitTarget(cancelledId)
+        val nextPassword = "next-qr-secret-synthetic".toCharArray()
+        val nextId = attemptId("after-code-cancel")
+        val next = lifecycle.startQr(nextId, PairingSecret(nextPassword), deadlineMillis = 20)
+
+        assertTrue(thrown is CancellationException)
+        assertCleared(code)
+        assertTrue(action.expectedSourceIsCleared())
+        assertEquals(cancelled.state.phase, PairingAttemptPhase.CANCELLED)
+        assertEquals(cancelled.state.failure, PairingFailure.CANCELLED)
+        assertEquals(cancelled.rejection, PairingCommandRejection.TERMINAL_ATTEMPT)
+        assertEquals(next.state.phase, PairingAttemptPhase.PREPARING)
+        assertNull(next.rejection)
+        lifecycle.cancel(nextId)
+        assertCleared(nextPassword)
+    }
+
+    @Test
+    fun `commands without a current attempt return safe idle rejection and clear submitted code`() {
+        val token = "attempt-synthetic-no-active"
+        val code = "012345".toCharArray()
+        val lifecycle = PairingLifecycle(FakeClock(), FakePairingAction())
+        val attemptId = PairingAttemptId.of(token)
+        val results = listOf(
+            lifecycle.awaitTarget(attemptId),
+            lifecycle.onTargetReady(attemptId),
+            lifecycle.cancel(attemptId),
+            lifecycle.fail(attemptId),
+            lifecycle.markUnsupported(attemptId),
+            lifecycle.expire(attemptId),
+            lifecycle.submitCode(attemptId, code),
+        )
+
+        results.forEach(::assertNoActiveAttempt)
+        assertCleared(code)
+        val rendered = results.joinToString()
+        assertFalse(rendered.contains(token))
+        assertFalse(rendered.contains("012345"))
+    }
+
+    @Test
+    fun `early expiry is rejected without changing QR or code attempts and both can still succeed`() {
+        val qrPassword = "qr-early-expiry-secret".toCharArray()
+        val qrAction = FakePairingAction(qrPassword)
+        val qrLifecycle = PairingLifecycle(FakeClock(nowMillis = 19), qrAction)
+        val qrId = attemptId("qr-early-expiry")
+        qrLifecycle.startQr(qrId, PairingSecret(qrPassword), deadlineMillis = 20)
+        val qrWaiting = qrLifecycle.awaitTarget(qrId)
+
+        val qrEarly = qrLifecycle.expire(qrId)
+        val qrSuccess = qrLifecycle.onTargetReady(qrId)
+
+        val code = "012345".toCharArray()
+        val codeAction = FakePairingAction(code)
+        val codeLifecycle = PairingLifecycle(FakeClock(nowMillis = 19), codeAction)
+        val codeId = attemptId("code-early-expiry")
+        val codeWaiting = codeLifecycle.startSixDigit(codeId, deadlineMillis = 20)
+
+        val codeEarly = codeLifecycle.expire(codeId)
+        val codeSuccess = codeLifecycle.submitCode(codeId, code)
+
+        assertEquals(qrEarly.state, qrWaiting.state)
+        assertEquals(qrEarly.rejection, PairingCommandRejection.NOT_EXPIRED)
+        assertEquals(qrSuccess.state.phase, PairingAttemptPhase.SUCCEEDED)
+        assertEquals(codeEarly.state, codeWaiting.state)
+        assertEquals(codeEarly.rejection, PairingCommandRejection.NOT_EXPIRED)
+        assertEquals(codeSuccess.state.phase, PairingAttemptPhase.SUCCEEDED)
+        assertCleared(qrPassword)
+        assertCleared(code)
+    }
+
+    @Test
+    fun `attempt started at its exact deadline is immediately expired and clears QR secret without action`() {
+        val password = "exact-start-secret-synthetic".toCharArray()
+        val action = FakePairingAction(password)
+        val lifecycle = PairingLifecycle(FakeClock(nowMillis = 20), action)
+
+        val result = lifecycle.startQr(
+            attemptId = attemptId("exact-start"),
+            password = PairingSecret(password),
+            deadlineMillis = 20,
+        )
+
+        assertEquals(result.state.phase, PairingAttemptPhase.EXPIRED)
+        assertEquals(result.state.failure, PairingFailure.EXPIRED)
+        assertNull(result.rejection)
+        assertTrue(action.calls.isEmpty())
+        assertCleared(password)
+    }
+
+    @Test
+    fun `close is idempotent clears active material and identifiers and permanently rejects later commands`() {
+        val token = "attempt-synthetic-close-active"
+        val password = "close-active-secret-synthetic".toCharArray()
+        val action = FakePairingAction(password)
+        val lifecycle = PairingLifecycle(FakeClock(), action)
+        val activeId = PairingAttemptId.of(token)
+        lifecycle.startQr(activeId, PairingSecret(password), deadlineMillis = 20)
+        lifecycle.awaitTarget(activeId)
+
+        lifecycle.close()
+        lifecycle.close()
+
+        assertCleared(password)
+        assertTrue(action.calls.isEmpty())
+        assertInstanceCollectionsCleared(lifecycle)
+
+        val lateCode = "012345".toCharArray()
+        val callbackResults = listOf(
+            lifecycle.awaitTarget(activeId),
+            lifecycle.onTargetReady(activeId),
+            lifecycle.cancel(activeId),
+            lifecycle.fail(activeId),
+            lifecycle.markUnsupported(activeId),
+            lifecycle.expire(activeId),
+            lifecycle.submitCode(activeId, lateCode),
+        )
+        val reusedSecret = "close-reused-secret-synthetic".toCharArray()
+        val newSecret = "close-new-secret-synthetic".toCharArray()
+        val startResults = listOf(
+            lifecycle.startQr(activeId, PairingSecret(reusedSecret), deadlineMillis = 20),
+            lifecycle.startQr(attemptId("close-new"), PairingSecret(newSecret), deadlineMillis = 20),
+        )
+
+        (callbackResults + startResults).forEach(::assertClosedIdle)
+        assertCleared(lateCode)
+        assertCleared(reusedSecret)
+        assertCleared(newSecret)
+        val rendered = (callbackResults + startResults).joinToString()
+        listOf(token, "012345", "close-active-secret", "close-reused-secret", "close-new-secret").forEach {
+            assertFalse(rendered.contains(it))
+        }
+    }
+
     private fun assertSafeRendering(
         result: PairingCommandResult,
         terminalSubmit: PairingCommandResult,
@@ -374,6 +549,29 @@ class PairingLifecycleTest {
                 }
                 .all { method -> method.name in allowedNames },
         )
+    }
+
+    private fun assertNoActiveAttempt(result: PairingCommandResult) {
+        assertEquals(result.state.phase, PairingAttemptPhase.IDLE)
+        assertEquals(result.state.failure, PairingFailure.NO_ACTIVE_ATTEMPT)
+        assertEquals(result.rejection, PairingCommandRejection.NO_ACTIVE_ATTEMPT)
+    }
+
+    private fun assertClosedIdle(result: PairingCommandResult) {
+        assertEquals(result.state.phase, PairingAttemptPhase.IDLE)
+        assertEquals(result.state.failure, PairingFailure.NO_ACTIVE_ATTEMPT)
+        assertEquals(result.rejection, PairingCommandRejection.CLOSED)
+    }
+
+    private fun assertInstanceCollectionsCleared(lifecycle: PairingLifecycle) {
+        val instanceCollections = lifecycle.javaClass.declaredFields.filter { field ->
+            !Modifier.isStatic(field.modifiers) && Collection::class.java.isAssignableFrom(field.type)
+        }
+        assertTrue(instanceCollections.isNotEmpty())
+        instanceCollections.forEach { field ->
+            field.isAccessible = true
+            assertTrue((field.get(lifecycle) as Collection<*>).isEmpty())
+        }
     }
 
     private fun assertTerminalStateIsStable(
