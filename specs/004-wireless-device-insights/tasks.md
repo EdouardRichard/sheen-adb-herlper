@@ -80,9 +80,9 @@
 
 ### Tests first
 
-- [ ] T017 [P] [US1] 先写 QR coordinator 失败测试，覆盖标准 payload、`SecureRandom` 注入、Android Studio 兼容的 `studio-` 加 10 字符实例名、12 字符 delimiter-safe password、2 分钟 TTL、精确 service instance 匹配、过期/重复扫描、首个明确结果获胜、结束清理和不自动连接于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/QrPairingCoordinatorTest.kt`
+- [X] T017 [P] [US1] 先写 QR coordinator 失败测试，覆盖标准 payload、`SecureRandom` 注入、Android Studio 兼容的 `studio-` 加 10 字符实例名、12 字符 delimiter-safe password、2 分钟 TTL、精确 service instance 匹配、过期/重复扫描、首个明确结果获胜、结束清理和不自动连接于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/QrPairingCoordinatorTest.kt`
   - **验收**: 目标测试因 coordinator 缺失而失败；payload 断言为 `WIFI:T:ADB;S:<instance>;P:<password>;;`，固定 fake entropy 可复验长度、字符集和不可复用行为，fixture 不进入日志。
-- [ ] T018 [US1] 实现 QR pairing coordinator 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/pairing/QrPairingCoordinator.kt`
+- [X] T018 [US1] 实现 QR pairing coordinator 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/pairing/QrPairingCoordinator.kt`
   - **验收**: T017 通过；使用注入的加密安全随机源生成规定材料，只匹配仍有效且 instance 完全相同的 pairing service，结束后 QR payload/password/bitmap 引用失效，成功只表示已授权而未自动连接。
 - [ ] T019 [P] [US1] 先写 Kadb 与 manager QR 集成失败测试，覆盖任意长度 QR password、六位码共用 client path、超时/取消映射、`CharArray` 清零和已有 Session 不被替换于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/QrPairingSessionManagerTest.kt`
   - **验收**: 目标测试在现有 Kadb/manager 接线下失败；测试 fake 记录调用类别但不保留 secret 原文。
