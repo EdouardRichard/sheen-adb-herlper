@@ -84,11 +84,11 @@
   - **验收**: 目标测试因 coordinator 缺失而失败；payload 断言为 `WIFI:T:ADB;S:<instance>;P:<password>;;`，固定 fake entropy 可复验长度、字符集和不可复用行为，fixture 不进入日志。
 - [X] T018 [US1] 实现 QR pairing coordinator 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/pairing/QrPairingCoordinator.kt`
   - **验收**: T017 通过；使用注入的加密安全随机源生成规定材料，只匹配仍有效且 instance 完全相同的 pairing service，结束后 QR payload/password/bitmap 引用失效，成功只表示已授权而未自动连接。
-- [ ] T019 [P] [US1] 先写 Kadb 与 manager QR 集成失败测试，覆盖任意长度 QR password、六位码共用 client path、超时/取消映射、`CharArray` 清零和已有 Session 不被替换于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/QrPairingSessionManagerTest.kt`
+- [X] T019 [P] [US1] 先写 Kadb 与 manager QR 集成失败测试，覆盖任意长度 QR password、六位码共用 client path、超时/取消映射、`CharArray` 清零和已有 Session 不被替换于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/QrPairingSessionManagerTest.kt`
   - **验收**: 目标测试在现有 Kadb/manager 接线下失败；测试 fake 记录调用类别但不保留 secret 原文。
 - [X] T020A [US1] 建立 manager QR 公共契约与已有 Session 冲突错误于 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbModels.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbSessionManager.kt`
   - **验收**: T019 从缺少公共入口的编译失败推进为行为失败；入口仅接受项目自有 `PairingSecret`/`PairingMethod`，默认兼容实现拒绝并清理 secret，结构化冲突不含端点或 secret，既有 manager fake 无需新增实现即可编译。
-- [ ] T020 [US1] 接入 QR/配对码共用 Kadb client path 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/KadbProtocolClientFactory.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
+- [X] T020 [US1] 接入 QR/配对码共用 Kadb client path 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/KadbProtocolClientFactory.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
   - **验收**: T019、既有配对码测试和 manager 回归通过；QR password 不被错误限制为六位，所有结束路径清零，配对不会创建第二个活动 Session。
 - [ ] T021 [P] [US1] 先写 QR matrix encoder 失败测试，覆盖 UTF-8 payload、固定 quiet zone/纠错配置、正方形矩阵、确定性输出和不提供 decode/camera API 于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/QrMatrixEncoderTest.kt`
   - **验收**: 目标测试因 encoder 缺失而失败；测试不把真实 QR 图像写入磁盘或 golden 文件。
