@@ -1,12 +1,21 @@
 # Gradle files
 .gradle/
 build/
+out/
+*.class
+*.jar
 
 # Local configuration file (sdk path, etc)
 local.properties
 
 # Log/OS Files
 *.log
+.DS_Store
+Thumbs.db
+*.tmp
+*.swp
+.vscode/
+.superpowers/
 
 # Android Studio generated files and folders
 captures/

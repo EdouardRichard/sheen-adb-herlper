@@ -76,8 +76,8 @@
 
 ### Tests first
 
-- [ ] T017 [P] [US1] 先写 QR coordinator 失败测试，覆盖标准 payload、`SecureRandom` 注入、service/password 各至少 128-bit 熵与 26 位 Base32 大写 ASCII、2 分钟 TTL、精确 service instance 匹配、过期/重复扫描、首个明确结果获胜、结束清理和不自动连接于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/QrPairingCoordinatorTest.kt`
-  - **验收**: 目标测试因 coordinator 缺失而失败；payload 断言为 `WIFI:T:ADB;S:<instance>;P:<password>;;`，固定 fake entropy 可复验编码和不可复用行为，fixture 不进入日志。
+- [ ] T017 [P] [US1] 先写 QR coordinator 失败测试，覆盖标准 payload、`SecureRandom` 注入、Android Studio 兼容的 `studio-` 加 10 字符实例名、12 字符 delimiter-safe password、2 分钟 TTL、精确 service instance 匹配、过期/重复扫描、首个明确结果获胜、结束清理和不自动连接于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/QrPairingCoordinatorTest.kt`
+  - **验收**: 目标测试因 coordinator 缺失而失败；payload 断言为 `WIFI:T:ADB;S:<instance>;P:<password>;;`，固定 fake entropy 可复验长度、字符集和不可复用行为，fixture 不进入日志。
 - [ ] T018 [US1] 实现 QR pairing coordinator 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/pairing/QrPairingCoordinator.kt`
   - **验收**: T017 通过；使用注入的加密安全随机源生成规定材料，只匹配仍有效且 instance 完全相同的 pairing service，结束后 QR payload/password/bitmap 引用失效，成功只表示已授权而未自动连接。
 - [ ] T019 [P] [US1] 先写 Kadb 与 manager QR 集成失败测试，覆盖任意长度 QR password、六位码共用 client path、超时/取消映射、`CharArray` 清零和已有 Session 不被替换于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/QrPairingSessionManagerTest.kt`
@@ -148,10 +148,10 @@
 
 ### Tests first
 
-- [ ] T040 [P] [US3] 先写 LAN manager 失败测试，覆盖前台 10 秒窗口、15 个服务、重复/丢失、网络切换、取消、后台停止、端点点击后重新确认、不自动 pair/connect，以及成功 TLS/ADB Session 后以已验证主机公钥指纹生成 opaque identity 并只回填用户所选 observation 于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/LanDiscoverySessionManagerTest.kt`
-  - **验收**: 目标测试在 foundational manager 上因 LAN/identity 策略未完成而失败；fake adapter 记录的 service type 仅为两个 TLS 类型且无探测请求，未连接或指纹不一致的 pairing/connect 条目不得合并。
-- [ ] T041 [US3] 完成 LAN discovery 生命周期、端点重新确认与已验证 Session 身份回填于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/WirelessDiscoveryReducer.kt`
-  - **验收**: T040、T005、T013 和全部既有 manager 测试通过；离页/后台/取消后 3 秒内停止，过期端点结构化失败，只有同一已验证公钥指纹可合并且 opaque identity 不进入日志/持久化，不自动替换 Session。
+- [ ] T040 [P] [US3] 先写 LAN manager 失败测试，覆盖前台 10 秒窗口、15 个服务、重复/丢失、网络切换、取消、后台停止、端点点击后重新确认、不自动 pair/connect，以及成功 TLS/ADB Session 后把同一主机公钥指纹生成的 opaque identity 同时回填 attempt 关联的 pairing observation 与最终 connect observation 于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/LanDiscoverySessionManagerTest.kt`
+  - **验收**: 目标测试在 foundational manager 上因 LAN/identity 策略未完成而失败；fake adapter 记录的 service type 仅为两个 TLS 类型且无探测请求，只有同一 attempt 且指纹一致的 pairing/connect 条目合并，未连接或指纹不一致的条目保持独立。
+- [ ] T041 [US3] 完成 LAN discovery 生命周期、端点重新确认与 attempt 两端已验证 Session 身份回填于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/WirelessDiscoveryReducer.kt`
+  - **验收**: T040、T005、T013 和全部既有 manager 测试通过；离页/后台/取消后 3 秒内停止，过期端点结构化失败，同一 attempt 的 pairing/connect observation 仅在已验证公钥指纹相同后合并，opaque identity 不进入日志/持久化且不自动替换 Session。
 - [ ] T042 [P] [US3] 先写设备发现 reducer 失败测试，覆盖 scanning/content/empty/error/cancelled、可靠合并、未知关系标记、lost/port-changed、手动回退和选择确认于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/DevicesDiscoveryReducerTest.kt`
   - **验收**: 目标测试因 discovery model/reducer 缺失而失败；同名/IP 相同不构成 verified merge。
 - [ ] T043 [US3] 实现设备发现 UI 模型与 reducer 于 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesDiscoveryModels.kt` 和 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesDiscoveryReducer.kt`
@@ -214,12 +214,12 @@
   - **验收**: 目标测试因 parser/filter 缺失而失败；合成日志不含真实应用/设备信息，未知格式保留 raw text 且不伪造 PID/level/tag。
 - [ ] T059 [US5] 实现 structured Logcat parser 与组合 filter 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/diagnostics/StructuredLogcatParser.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/diagnostics/DiagnosticFilter.kt`
   - **验收**: T058 通过；所有启用条件取交集，UNKNOWN/MULTIPLE association 不作为唯一应用命中，过滤不扩大原始缓冲。
-- [ ] T060 [P] [US5] 先写应用 UID 获取与进程关联失败测试，覆盖 `pm list packages -3 -U --user` 解析、Android UID 归一化为 `(userId,appId)`、Session/snapshot generation、PID 复用、共享 UID、多用户、多进程、字段缺失、进程退出和 VERIFIED/MULTIPLE/UNKNOWN 于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ProcessAssociationTest.kt`
-  - **验收**: 目标测试因应用 UID/association/model 缺失而失败；任何共享 UID、多用户冲突或不确定关系都断言为 MULTIPLE/UNKNOWN，禁止按 PID 或进程名前缀猜测唯一 package。
+- [ ] T060 [P] [US5] 先写应用 UID 命令与 Session 集成失败测试，覆盖 `pm list packages -3 -U --user` 输出、UID 缺失降级、当前用户范围和既有应用操作回归于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationCapabilitiesTest.kt` 和 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationSessionManagerTest.kt`
+  - **验收**: 新断言因命令尚未请求/解析 UID 而失败，现有 fixture 更新为合成 UID 且不含真实包名；测试继续证明只枚举当前用户第三方应用并保持 force-stop/enable/disable 语义。
 - [ ] T061 [US5] 扩展应用清单 UID 命令/解析与项目自有关联模型于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/ApplicationCapabilities.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbModels.kt`
   - **验收**: T060 中命令、解析和 UID 归一化断言通过，既有应用管理测试同步保持当前用户第三方范围；UID 缺失显式保留 unknown，不记录包名上下文且不新增进程终止能力。
-- [ ] T062 [US5] 先写 manager 诊断集成失败测试，覆盖 structured stream、进程/application snapshot 关联、停止/取消/断开/Session change、解析降级和旧结果拒绝于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/DiagnosticsSessionManagerTest.kt`
-  - **验收**: 目标测试因 manager 尚未交付 structured record/association 而失败；现有 raw copy/export 语义在 fixture 中保持可验证。
+- [ ] T062 [US5] 先写进程关联与 manager 诊断集成失败测试，覆盖 Android UID 归一化为 `(userId,appId)`、Session/snapshot generation、PID 复用、共享 UID、多用户、多进程、字段缺失、进程退出、VERIFIED/MULTIPLE/UNKNOWN、structured stream、停止/取消/断开/Session change 和旧结果拒绝于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ProcessAssociationTest.kt` 和 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/DiagnosticsSessionManagerTest.kt`
+  - **验收**: 目标测试因 association/manager 集成缺失而失败；任何共享 UID、多用户冲突或不确定关系均为 MULTIPLE/UNKNOWN，禁止按 PID/进程名前缀猜测，现有 raw copy/export 语义保持可验证。
 - [ ] T063 [US5] 实现可靠进程关联并接入 structured Logcat/关联快照于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/diagnostics/ProcessAssociation.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
   - **验收**: T060、T062、现有 streamLogcat/listProcesses 与全部 core tests 通过；只有同 Session/代次且归一化 UID 唯一匹配时为 VERIFIED，离页/停止/断开/Session change 不交付旧记录，解析错误明确降级。
 - [ ] T064 [P] [US5] 先写进程筛选 Feature 失败测试，覆盖完整/部分 PID、进程名、应用、AND 语义、空/退出/不支持、UNKNOWN/MULTIPLE 和 Session 清理于 `feature/processes/src/test/kotlin/com/sheen/adb/feature/processes/ProcessesAnalysisPolicyTest.kt`

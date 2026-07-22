@@ -117,9 +117,9 @@ feature/logcat/
 
 ### 1. 无线发现与配对
 
-- QR 内容固定为 `WIFI:T:ADB;S:<service-instance>;P:<password>;;`。使用 `SecureRandom` 分别生成至少 128-bit 熵的 service instance 与 password，并编码为协议兼容的 Base32 大写 ASCII；两者各 26 个字符、有效期默认 2 分钟且每次尝试不可复用。`:feature:devices` 仅用 ZXing core 的 QR writer 编码并显示（不引入 scanner/camera integration），随后等待被控端无线调试设置扫描后公布匹配的 `_adb-tls-pairing._tcp` 服务；解析后调用现有 Kadb 配对客户端。
+- QR 内容固定为 `WIFI:T:ADB;S:<service-instance>;P:<password>;;`。使用 `SecureRandom` 按 Android Studio 参考实现生成 `studio-` 加 10 个 `A-Z/a-z/0-9/-` 字符的 service instance，以及 12 个 QR delimiter-safe ASCII 字符的 password；有效期默认 2 分钟且每次尝试不可复用。`:feature:devices` 仅用 ZXing core 的 QR writer 编码并显示（不引入 scanner/camera integration），随后等待被控端无线调试设置扫描后公布匹配的 `_adb-tls-pairing._tcp` 服务；解析后调用现有 Kadb 配对客户端。
 - 只发现 `_adb-tls-pairing._tcp` 与 `_adb-tls-connect._tcp`；不发现旧式不安全 `_adb._tcp`，不枚举地址空间或探测端口。
-- 同一 `(Network, serviceType, serviceName)` 的重复回调去重。跨 pairing/connect 记录只在成功建立 TLS/ADB Session 后，由 `AdbSessionManager` 已验证的主机公钥指纹生成进程内 opaque `verifiedDeviceId`，并回填到该次用户明确选择的 observation；只有两个 observation 的该值相同才合并。配对成功但尚未连接时，或 Kadb 未暴露可靠对端身份时，默认分开展示并要求用户选择，不按名称、地址或端口猜测。
+- 同一 `(Network, serviceType, serviceName)` 的重复回调去重。跨 pairing/connect 记录只在成功建立 TLS/ADB Session 后，由 `AdbSessionManager` 已验证的主机公钥指纹生成进程内 opaque `verifiedDeviceId`，并同时回填到同一 attempt 中用户选择的 pairing observation 与最终连接成功的 connect observation；只有两个 observation 的该值相同才合并。配对成功但尚未连接时，或 Kadb 未暴露可靠对端身份时，默认分开展示并要求用户选择，不按名称、地址或端口猜测。
 - API 30–32 使用 legacy discover/resolve 加临时 `MulticastLock`；API 33+ 绑定当前 `Network`；API 34+ 使用多地址回调。每次发现有 generation token，停止后丢弃迟到回调并释放监听器/锁。
 
 ### 2. 本机通知与短时前台服务
