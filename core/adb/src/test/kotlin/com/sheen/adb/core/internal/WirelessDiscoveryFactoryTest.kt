@@ -163,7 +163,10 @@ class WirelessDiscoveryFactoryTest {
             closeDone.countDown()
         }
         closeThread.start()
-        assertTrue(awaitBlocked(closeThread), "The close path did not contend with the active adapter callback")
+        assertTrue(
+            awaitBlockedOrDone(closeThread, closeDone),
+            "The close path neither contended with nor completed during the active adapter callback",
+        )
         allowObserverClose.countDown()
 
         assertTrue(callbackDone.await(1, TimeUnit.SECONDS), "The adapter callback deadlocked while closing its source")
@@ -205,7 +208,7 @@ class WirelessDiscoveryFactoryTest {
 
     private fun sourceWithAdapter(adapter: AndroidNsdDiscoveryAdapter): WirelessDiscoverySource {
         val application = allocate<TestApplicationContext>().also {
-            it.directory = File(System.getProperty("java.io.tmpdir"))
+            it.directory = File(requireNotNull(System.getProperty("java.io.tmpdir")))
         }
         val source = AndroidNsdWirelessDiscoverySourceFactory(application).create(NoOpObserver)
         setField(source, "adapter", adapter)
@@ -243,10 +246,10 @@ class WirelessDiscoveryFactoryTest {
         isDaemon = true
     }
 
-    private fun awaitBlocked(thread: Thread): Boolean {
+    private fun awaitBlockedOrDone(thread: Thread, done: CountDownLatch): Boolean {
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1)
         while (System.nanoTime() < deadline) {
-            if (thread.state == Thread.State.BLOCKED) return true
+            if (thread.state == Thread.State.BLOCKED || done.count == 0L) return true
             Thread.yield()
         }
         return false
