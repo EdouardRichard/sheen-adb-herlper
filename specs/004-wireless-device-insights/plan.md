@@ -122,6 +122,7 @@ feature/logcat/
 - 同一 `(Network, serviceType, serviceName)` 的重复回调去重。跨 pairing/connect 记录只在成功建立 TLS/ADB Session 后，由 `AdbSessionManager` 已验证的主机公钥指纹生成进程内 opaque `verifiedDeviceId`，并同时回填到同一 attempt 中用户选择的 pairing observation 与最终连接成功的 connect observation；只有两个 observation 的该值相同才合并。配对成功但尚未连接时，或 Kadb 未暴露可靠对端身份时，默认分开展示并要求用户选择，不按名称、地址或端口猜测。
 - API 30–32 使用 legacy discover/resolve 加临时 `MulticastLock`；API 33+ 绑定当前 `Network`；API 34+ 使用多地址回调。每次发现有 generation token，停止后丢弃迟到回调并释放监听器/锁。
 - manager 接线分为两个独立实施边界：先在 `AdbModels.kt` 与 `AdbSessionManager.kt` 定义 `AdbOperationStage.DISCOVERY`、不含平台/端点原文的结构化发现错误、项目自有 discovery source/coordinator 契约与状态流；再仅在 `DefaultAdbSessionManager.kt` 实现唯一活动发现、generation/session guard、并发拒绝、超时/取消终态和 `close()` 清理。这样 Android NSD 类型不会泄漏到公开 API，并保持每个实施任务最多修改两个文件。
+- Android NSD 装配也分为两个实施边界：`AdbManagerProvider.kt` 与 `AndroidNsdDiscoveryAdapter.kt` 负责 application Context 单例装配和 source 生命周期；随后由独立任务仅修改 `NsdDiscoveryPolicy.kt` 与 `AndroidNsdDiscoveryAdapter.kt`，为 discovery 已启动后的异步 resolve 权限拒绝增加内部 failure 分支、锁外单次终态通知与确定性资源释放，避免 `SecurityException` 逃出平台 callback 或退化为 timeout。该拆分保持每任务最多两个文件。
 
 ### 2. 本机通知与短时前台服务
 
