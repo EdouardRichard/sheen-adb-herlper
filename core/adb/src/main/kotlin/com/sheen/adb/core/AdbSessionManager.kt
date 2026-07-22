@@ -2,10 +2,47 @@ package com.sheen.adb.core
 
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import java.io.InputStream
 import java.io.OutputStream
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+
+data class WirelessDiscoverySourceRequest(
+    val generation: Long,
+    val mode: WirelessDiscoveryMode,
+)
+
+enum class WirelessDiscoverySourceFailure {
+    NETWORK_UNAVAILABLE,
+    PERMISSION_UNAVAILABLE,
+    RESOLUTION_FAILED,
+    PLATFORM_FAILURE,
+}
+
+sealed interface WirelessDiscoverySourceStartResult {
+    data object Started : WirelessDiscoverySourceStartResult
+
+    data class Rejected(
+        val failure: WirelessDiscoverySourceFailure,
+    ) : WirelessDiscoverySourceStartResult
+}
+
+interface WirelessDiscoverySourceObserver {
+    fun onEvent(event: WirelessDiscoveryEvent)
+
+    fun onFailure(failure: WirelessDiscoverySourceFailure)
+}
+
+interface WirelessDiscoverySource : AutoCloseable {
+    fun start(request: WirelessDiscoverySourceRequest): WirelessDiscoverySourceStartResult
+
+    override fun close()
+}
+
+fun interface WirelessDiscoverySourceFactory {
+    fun create(observer: WirelessDiscoverySourceObserver): WirelessDiscoverySource
+}
 
 interface AdbSessionManager : AutoCloseable {
     val connectionState: StateFlow<AdbConnectionState>
@@ -39,6 +76,13 @@ interface AdbSessionManager : AutoCloseable {
     suspend fun listProcesses(timeout: Duration = 15.seconds): AdbOperationResult<ProcessSnapshot>
 
     suspend fun listApplications(timeout: Duration = 15.seconds): AdbOperationResult<ApplicationSnapshot>
+
+    fun observeWirelessServices(
+        mode: WirelessDiscoveryMode,
+        timeout: Duration,
+    ): Flow<AdbOperationResult<WirelessDiscoveryState>> = flowOf(
+        AdbOperationResult.Failure(AdbError.DiscoveryPlatformFailure),
+    )
 
     suspend fun loadRemoteDirectory(
         path: String? = null,

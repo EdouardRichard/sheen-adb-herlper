@@ -4,6 +4,7 @@ import kotlin.time.Duration
 
 enum class AdbOperationStage {
     ADDRESS,
+    DISCOVERY,
     CONNECT,
     AUTHENTICATE,
     PAIR,
@@ -61,6 +62,62 @@ sealed interface AdbError {
     val nextStep: String
     val technicalCode: String
     val allowsPairingFallback: Boolean get() = false
+
+    data object DiscoverySessionChanged : AdbError {
+        override val stage = AdbOperationStage.DISCOVERY
+        override val userMessage = "无线发现所属的 ADB 会话已变化。"
+        override val nextStep = "请在当前会话中重新开始扫描。"
+        override val technicalCode = "ADB_DISCOVERY_SESSION_CHANGED"
+    }
+
+    data object DiscoveryTimeout : AdbError {
+        override val stage = AdbOperationStage.DISCOVERY
+        override val userMessage = "无线发现已超时。"
+        override val nextStep = "请确认无线调试已开启后重新扫描。"
+        override val technicalCode = "ADB_DISCOVERY_TIMEOUT"
+    }
+
+    data object DiscoveryNetworkUnavailable : AdbError {
+        override val stage = AdbOperationStage.DISCOVERY
+        override val userMessage = "当前网络无法用于无线发现。"
+        override val nextStep = "请连接到可用的局域网后重新扫描。"
+        override val technicalCode = "ADB_DISCOVERY_NETWORK_UNAVAILABLE"
+    }
+
+    data object DiscoveryPermissionUnavailable : AdbError {
+        override val stage = AdbOperationStage.DISCOVERY
+        override val userMessage = "无线发现所需的系统能力当前不可用。"
+        override val nextStep = "请检查应用权限和系统网络设置后重试。"
+        override val technicalCode = "ADB_DISCOVERY_PERMISSION_UNAVAILABLE"
+    }
+
+    data object DiscoveryResolutionFailed : AdbError {
+        override val stage = AdbOperationStage.DISCOVERY
+        override val userMessage = "无法解析已发现的无线调试服务。"
+        override val nextStep = "请保持无线调试页面开启并重新扫描。"
+        override val technicalCode = "ADB_DISCOVERY_RESOLUTION_FAILED"
+    }
+
+    data object DiscoveryPlatformFailure : AdbError {
+        override val stage = AdbOperationStage.DISCOVERY
+        override val userMessage = "系统无线发现服务暂时不可用。"
+        override val nextStep = "请稍后重新扫描，或改用手动输入。"
+        override val technicalCode = "ADB_DISCOVERY_PLATFORM_FAILURE"
+    }
+
+    data object DiscoveryConflict : AdbError {
+        override val stage = AdbOperationStage.DISCOVERY
+        override val userMessage = "已有无线发现任务正在运行。"
+        override val nextStep = "请先取消当前扫描，再开始新的扫描。"
+        override val technicalCode = "ADB_DISCOVERY_CONFLICT"
+    }
+
+    data object DiscoveryManagerClosed : AdbError {
+        override val stage = AdbOperationStage.DISCOVERY
+        override val userMessage = "无线发现管理器已关闭。"
+        override val nextStep = "请重新打开应用后再开始扫描。"
+        override val technicalCode = "ADB_DISCOVERY_MANAGER_CLOSED"
+    }
 
     data class OperationConflict(
         val requestedKind: AdbExclusiveOperationKind,
