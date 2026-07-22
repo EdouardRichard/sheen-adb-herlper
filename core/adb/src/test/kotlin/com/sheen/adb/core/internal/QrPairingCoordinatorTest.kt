@@ -54,6 +54,7 @@ class QrPairingCoordinatorTest {
             val closePassword = coordinator.materialPassword(material)
             coordinator.close()
             assertNull(coordinator.payload(material))
+            assertNull(coordinator.serviceInstanceOrNull(material))
             assertCleared(closePassword)
         } finally {
             coordinator.close()
@@ -113,6 +114,7 @@ class QrPairingCoordinatorTest {
             assertFalse(coordinator.complete(attemptId, PairingAttemptPhase.FAILED))
             assertEquals(coordinator.state(attemptId), PairingAttemptPhase.SUCCEEDED)
             assertNull(coordinator.payload(material))
+            assertNull(coordinator.serviceInstanceOrNull(material))
             assertCleared(password)
         } finally {
             coordinator.close()
@@ -127,19 +129,21 @@ class QrPairingCoordinatorTest {
         try {
             val material = coordinator.start(attemptId)
             val password = coordinator.materialPassword(material)
-            val service = observation(
-                "late",
-                WirelessServiceType.PAIRING,
-                coordinator.serviceInstance(material),
-                WirelessServiceStatus.RESOLVED,
-            )
             clock.nowMillis = coordinator.deadlineMillis(material)
 
-            assertNull(coordinator.match(attemptId, service))
-            assertNull(coordinator.match(attemptId, service))
             assertEquals(coordinator.state(attemptId), PairingAttemptPhase.EXPIRED)
             assertNull(coordinator.payload(material))
+            assertNull(coordinator.serviceInstanceOrNull(material))
             assertCleared(password)
+
+            val replacementId = attemptId("expired-replacement")
+            val replacement = coordinator.start(replacementId)
+            val replacementPassword = coordinator.materialPassword(replacement)
+            assertTrue(coordinator.complete(replacementId, PairingAttemptPhase.EXPIRED))
+            assertEquals(coordinator.state(replacementId), PairingAttemptPhase.EXPIRED)
+            assertNull(coordinator.payload(replacement))
+            assertNull(coordinator.serviceInstanceOrNull(replacement))
+            assertCleared(replacementPassword)
         } finally {
             coordinator.close()
         }
@@ -159,6 +163,7 @@ class QrPairingCoordinatorTest {
             assertFalse(coordinator.complete(firstId, PairingAttemptPhase.SUCCEEDED))
             assertEquals(coordinator.state(firstId), PairingAttemptPhase.CANCELLED)
             assertNull(coordinator.payload(first))
+            assertNull(coordinator.serviceInstanceOrNull(first))
             assertCleared(firstPassword)
 
             val secondId = attemptId("second-result")
@@ -174,12 +179,28 @@ class QrPairingCoordinatorTest {
             assertNull(coordinator.match(firstId, secondService))
             assertFalse(coordinator.complete(firstId, PairingAttemptPhase.CANCELLED))
             assertEquals(coordinator.state(secondId), PairingAttemptPhase.WAITING_FOR_TARGET)
-            val secondMatch = checkNotNull(coordinator.match(secondId, secondService))
-            val secondPassword = coordinator.matchPassword(secondMatch)
+            val secondPassword = coordinator.materialPassword(second)
+            assertTrue(coordinator.complete(secondId, PairingAttemptPhase.FAILED))
+            assertEquals(coordinator.state(secondId), PairingAttemptPhase.FAILED)
+            assertNull(coordinator.payload(second))
+            assertNull(coordinator.serviceInstanceOrNull(second))
+            assertCleared(secondPassword)
+
+            val thirdId = attemptId("close-active")
+            val third = coordinator.start(thirdId)
+            val thirdService = observation(
+                "third",
+                WirelessServiceType.PAIRING,
+                coordinator.serviceInstance(third),
+                WirelessServiceStatus.RESOLVED,
+            )
+            val thirdMatch = checkNotNull(coordinator.match(thirdId, thirdService))
+            val thirdPassword = coordinator.matchPassword(thirdMatch)
 
             coordinator.close()
-            assertNull(coordinator.payload(second))
-            assertCleared(secondPassword)
+            assertNull(coordinator.payload(third))
+            assertNull(coordinator.serviceInstanceOrNull(third))
+            assertCleared(thirdPassword)
         } finally {
             coordinator.close()
         }
@@ -230,7 +251,9 @@ class QrPairingCoordinatorTest {
         fun state(attemptId: PairingAttemptId): PairingAttemptPhase? =
             invoke("state", attemptId) as PairingAttemptPhase?
 
-        fun serviceInstance(material: Any): String = property(material, "getServiceInstance") as String
+        fun serviceInstance(material: Any): String = checkNotNull(serviceInstanceOrNull(material))
+
+        fun serviceInstanceOrNull(material: Any): String? = property(material, "getServiceInstance") as String?
 
         fun deadlineMillis(material: Any): Long = property(material, "getDeadlineMillis") as Long
 
