@@ -51,7 +51,7 @@
   - **验收**: 目标测试因模型/状态机缺失而失败；fixture 只使用合成凭据且断言终态内存不再暴露原值。
 - [X] T010 实现配对值对象与状态机于 `core/adb/src/main/kotlin/com/sheen/adb/core/PairingModels.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/pairing/PairingLifecycle.kt`
   - **验收**: T009 通过；所有终态幂等、不可回到活动态，六位码只接受 `0`–`9`，secret 在 `finally` 路径清零且不进入错误文本。
-- [X] T011 [P] 先扩充敏感数据脱敏失败测试，覆盖 QR payload、非六位 QR password、NSD service name、IPv6/IPv4 端点和包名上下文于 `core/adb/src/test/kotlin/com/sheen/adb/core/DiagnosticRedactorTest.kt`
+- [ ] T011 [P] 先扩充敏感数据脱敏失败测试，覆盖 QR payload、非六位 QR password、NSD service name、IPv6/IPv4 端点和包名上下文于 `core/adb/src/test/kotlin/com/sheen/adb/core/DiagnosticRedactorTest.kt`
   - **验收**: 新断言在现有实现上失败，且测试仅使用合成值；现有配对码与端点脱敏测试保持通过。
 - [ ] T012 扩充诊断字段白名单与脱敏规则于 `core/adb/src/main/kotlin/com/sheen/adb/core/DiagnosticRedactor.kt`
   - **验收**: T011 与全部既有 redactor 测试通过；输出只含 stage/outcome/technicalCode 等安全字段，不含 QR、端点、service name、包名或原始异常正文。
