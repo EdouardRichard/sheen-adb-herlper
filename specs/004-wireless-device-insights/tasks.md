@@ -57,8 +57,10 @@
   - **验收**: T011 与全部既有 redactor 测试通过；输出只含 stage/outcome/technicalCode 等安全字段，不含 QR、端点、service name、包名或原始异常正文。
 - [ ] T013 先写 manager 无线发现契约失败测试，覆盖 generation/session 归属、取消、超时、结构化错误、并发发现拒绝和关闭清理于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/WirelessSessionManagerContractTest.kt`
   - **验收**: 目标测试因 `AdbSessionManager` 无无线契约或实现不完整而失败；测试使用 fake adapter，不打开 Socket/NSD。
-- [ ] T014 扩展项目自有 manager 契约并接入 discovery coordinator 于 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbSessionManager.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
-  - **验收**: T013 及既有 manager 测试通过；公开 API 不暴露 `NsdManager`、`NsdServiceInfo`、Kadb、Socket 或原始命令，所有结果带 generation/session guard。
+- [ ] T014 扩展项目自有无线发现结果、结构化错误与 manager 契约于 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbModels.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbSessionManager.kt`
+  - **验收**: T013 从“契约缺失”推进到仅因默认 manager 未实现而失败；新增 `AdbOperationStage.DISCOVERY`、不含端点/平台异常原文的结构化发现错误及项目自有 discovery source/coordinator 契约，公开 API 不暴露 `NsdManager`、`NsdServiceInfo`、Kadb、Socket 或原始命令。
+- [ ] T014A 将 discovery coordinator 接入默认 manager 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
+  - **验收**: T013 及既有 manager 测试通过；同一时间只允许一个活动发现，所有结果带 generation/session guard，取消、超时、Session 变化、并发拒绝和 `close()` 均产生确定终态并清理 source。
 - [ ] T015 先写 Android discovery factory 失败测试，覆盖 application Context 注入、单例 manager、adapter close 和不保存 Activity 引用于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/WirelessDiscoveryFactoryTest.kt`
   - **验收**: 目标测试因 provider 尚未装配 Android adapter 而失败；测试验证同一进程仍只有一个 manager。
 - [ ] T016 将 Android NSD adapter 装配到唯一 manager 于 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbManagerProvider.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/AndroidNsdDiscoveryAdapter.kt`
@@ -296,7 +298,7 @@ flowchart TD
 
 ### Within-task TDD dependencies
 
-- T005 → T006；T007 → T008；T009 → T010；T011 → T012；T013 → T014；T015 → T016。
+- T005 → T006；T007 → T008；T009 → T010；T011 → T012；T013 → T014 → T014A → T015 → T016。
 - US1：T017 → T018 → T019/T020；T021 → T022；T023 → T024 → T025 → T026；T027 → T028。
 - US2：T029 → T030；T031 → T032；T033 → T034；T035 → T036；T037 → T038 → T039。
 - US3：T040 → T041；T042 → T043 → T044 → T045；T046 → T047。
@@ -309,10 +311,10 @@ flowchart TD
 |---|---|
 | FR-001–FR-007（两种配对、材料清理、单 Session） | T009–T010、T017–T028 |
 | FR-008–FR-015（本机发现、通知、锁屏、2 分钟服务） | T029–T039 |
-| FR-016–FR-022（LAN NSD、去重、前台生命周期、隐私） | T005–T008、T013–T016、T040–T047 |
+| FR-016–FR-022（LAN NSD、去重、前台生命周期、隐私） | T005–T008、T013–T016（含 T014A）、T040–T047 |
 | FR-023–FR-029（应用名、图标、搜索、Session） | T048–T057 |
 | FR-030–FR-036、FR-042（Logcat/进程基础分析） | T058–T069 |
-| FR-037–FR-041（通用取消/超时、纯本地、权限、回归） | T011–T016、T029–T039、T070–T080 |
+| FR-037–FR-041（通用取消/超时、纯本地、权限、回归） | T011–T016（含 T014A）、T029–T039、T070–T080 |
 
 | Success criteria | Primary tasks |
 |---|---|
@@ -320,7 +322,7 @@ flowchart TD
 | SC002–SC004（本机 5 秒、通知 3 秒与降级） | T029–T039、T076 |
 | SC005–SC006（15 服务 LAN 发现与手动回退） | T040–T047、T076、T078 |
 | SC007–SC009（200 应用、双字段搜索、可靠关联） | T048–T069、T079 |
-| SC010–SC011、SC013（取消清理、敏感数据与回归） | T011–T016、T074–T075 |
+| SC010–SC011、SC013（取消清理、敏感数据与回归） | T011–T016（含 T014A）、T074–T075 |
 | SC012（至少 10 名首次用户） | T077 |
 | SC014（诊断筛选与边界） | T058–T069、T079 |
 | SC015（本机后台例外边界） | T029–T039、T076 |
@@ -379,7 +381,7 @@ core 中涉及 AdbModels/manager 的 T061/T063 串行；process 与 logcat Featu
 
 ### MVP first
 
-1. 完成 T001–T016（Setup + Foundation，包括 US1/US3 共用 NSD 权限）。
+1. 完成 T001–T016（含新增的 T014A；Setup + Foundation，包括 US1/US3 共用 NSD 权限）。
 2. 完成 T017–T028（US1）。
 3. 停止并按 US1 Independent Test 单独验证 QR 与六位码。
 4. 未获项目负责人批准前不进入 Implement；Tasks 获批后仍逐任务执行 TDD 与文件上限。
