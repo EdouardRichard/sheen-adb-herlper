@@ -5,7 +5,9 @@ import com.sheen.adb.core.WirelessAddress
 import com.sheen.adb.core.WirelessDiscoveryEvent
 import com.sheen.adb.core.WirelessDiscoveryState
 import com.sheen.adb.core.WirelessNetworkKey
+import com.sheen.adb.core.WirelessObservationId
 import com.sheen.adb.core.WirelessServiceObservation
+import com.sheen.adb.core.WirelessServiceStatus
 import com.sheen.adb.core.WirelessServiceType
 import com.sheen.adb.core.internal.discovery.WirelessDiscoveryReducer
 import org.testng.Assert.assertEquals
@@ -28,23 +30,52 @@ class WirelessDiscoveryCoreTest {
     }
 
     @Test
-    fun `deduplicates repeated observations with the same network type and name`() {
+    fun `updates one observation for repeated network type and name while preserving latest address order`() {
         val reducer = WirelessDiscoveryReducer()
-        val observation = observation(
+        val observationId = WirelessObservationId("observation-pairing-alpha")
+        val firstObservation = observation(
             type = WirelessServiceType.PAIRING,
             name = "pairing-service-alpha",
+            observationId = observationId,
+            addresses = listOf(
+                WirelessAddress.Ipv4(192, 0, 2, 44),
+                WirelessAddress.Ipv6(
+                    segments = listOf(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0044),
+                    scopeId = "scope-synthetic-alpha",
+                ),
+            ),
+            status = WirelessServiceStatus.RESOLVING,
+            lastSeenAt = 100L,
+        )
+        val updatedObservation = observation(
+            type = WirelessServiceType.PAIRING,
+            name = "pairing-service-alpha",
+            observationId = observationId,
+            addresses = listOf(
+                WirelessAddress.Ipv6(
+                    segments = listOf(0x2001, 0x0db8, 0, 0, 0, 0, 0, 0x0044),
+                    scopeId = "scope-synthetic-alpha",
+                ),
+                WirelessAddress.Ipv4(192, 0, 2, 44),
+            ),
+            status = WirelessServiceStatus.RESOLVED,
+            lastSeenAt = 200L,
         )
 
         val afterFirst = reducer.reduce(
             WirelessDiscoveryState(generation = GENERATION),
-            WirelessDiscoveryEvent.ServiceObserved(GENERATION, observation),
+            WirelessDiscoveryEvent.ServiceObserved(GENERATION, firstObservation),
         )
         val afterRepeated = reducer.reduce(
             afterFirst,
-            WirelessDiscoveryEvent.ServiceObserved(GENERATION, observation),
+            WirelessDiscoveryEvent.ServiceObserved(GENERATION, updatedObservation),
         )
 
-        assertEquals(afterRepeated.services, listOf(observation))
+        assertEquals(afterRepeated.services.size, 1)
+        assertEquals(afterRepeated.services.single().observationId, observationId)
+        assertEquals(afterRepeated.services.single().addresses, updatedObservation.addresses)
+        assertEquals(afterRepeated.services.single().status, WirelessServiceStatus.RESOLVED)
+        assertEquals(afterRepeated.services.single().lastSeenAt, 200L)
         assertEquals(afterRepeated.devices.size, 1)
     }
 
@@ -77,7 +108,7 @@ class WirelessDiscoveryCoreTest {
 
     @Test
     fun `keeps unknown identity pairing and connect observations separate even with matching endpoints`() {
-        val sharedAddresses = setOf(WirelessAddress.Ipv4(192, 0, 2, 44))
+        val sharedAddresses = listOf(WirelessAddress.Ipv4(192, 0, 2, 44))
         val reducer = WirelessDiscoveryReducer()
 
         val result = reduce(
@@ -99,22 +130,49 @@ class WirelessDiscoveryCoreTest {
     }
 
     @Test
-    fun `ignores observations delivered for an older discovery generation`() {
+    fun `keeps pairing and connect observations separate for different verified identities`() {
+        val sharedAddresses = listOf(WirelessAddress.Ipv4(192, 0, 2, 44))
         val reducer = WirelessDiscoveryReducer()
-        val current = WirelessDiscoveryState(generation = GENERATION)
 
-        val result = reducer.reduce(
-            current,
-            WirelessDiscoveryEvent.ServiceObserved(
-                generation = GENERATION - 1,
-                observation = observation(
-                    type = WirelessServiceType.CONNECT,
-                    name = "late-service-alpha",
-                ),
+        val result = reduce(
+            reducer,
+            observation(
+                type = WirelessServiceType.PAIRING,
+                name = "pairing-service-alpha",
+                addresses = sharedAddresses,
+                verifiedDeviceId = VerifiedWirelessDeviceId("verified-device-alpha"),
+            ),
+            observation(
+                type = WirelessServiceType.CONNECT,
+                name = "connect-service-alpha",
+                addresses = sharedAddresses,
+                verifiedDeviceId = VerifiedWirelessDeviceId("verified-device-beta"),
             ),
         )
 
-        assertEquals(result, current)
+        assertEquals(result.services.size, 2)
+        assertEquals(result.devices.size, 2)
+    }
+
+    @Test
+    fun `accepts observations only from the exact current discovery generation`() {
+        val reducer = WirelessDiscoveryReducer()
+        val current = WirelessDiscoveryState(generation = GENERATION)
+
+        listOf(GENERATION - 1, GENERATION + 1).forEach { nonCurrentGeneration ->
+            val result = reducer.reduce(
+                current,
+                WirelessDiscoveryEvent.ServiceObserved(
+                    generation = nonCurrentGeneration,
+                    observation = observation(
+                        type = WirelessServiceType.CONNECT,
+                        name = "out-of-generation-service-alpha",
+                    ),
+                ),
+            )
+
+            assertEquals(result, current)
+        }
     }
 
     @Test
@@ -132,11 +190,11 @@ class WirelessDiscoveryCoreTest {
             observation(
                 type = WirelessServiceType.CONNECT,
                 name = "connect-service-ipv6-alpha",
-                addresses = setOf(ipv4, scopedIpv6),
+                addresses = listOf(ipv4, scopedIpv6),
             ),
         )
 
-        assertEquals(result.services.single().addresses, setOf(ipv4, scopedIpv6))
+        assertEquals(result.services.single().addresses, listOf(ipv4, scopedIpv6))
         assertNotEquals(scopedIpv6, sameIpv6WithOtherScope)
     }
 
@@ -150,15 +208,23 @@ class WirelessDiscoveryCoreTest {
     private fun observation(
         type: WirelessServiceType,
         name: String,
-        addresses: Set<WirelessAddress> = setOf(WirelessAddress.Ipv4(192, 0, 2, 44)),
+        observationId: WirelessObservationId = WirelessObservationId(
+            "observation-${type.name.lowercase()}-$name",
+        ),
+        addresses: List<WirelessAddress> = listOf(WirelessAddress.Ipv4(192, 0, 2, 44)),
+        status: WirelessServiceStatus = WirelessServiceStatus.DISCOVERED,
+        lastSeenAt: Long = 1L,
         verifiedDeviceId: VerifiedWirelessDeviceId? = null,
     ): WirelessServiceObservation = WirelessServiceObservation(
         networkKey = WirelessNetworkKey("network-synthetic-alpha"),
+        observationId = observationId,
         serviceType = type,
         serviceName = name,
         addresses = addresses,
         port = 42_001,
+        status = status,
         verifiedDeviceId = verifiedDeviceId,
+        lastSeenAt = lastSeenAt,
     )
 
     private companion object {
