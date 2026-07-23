@@ -283,7 +283,7 @@
   - **验收**: “待实现声明”只在 merged Manifest 证据通过后改为“已声明”；隐私说明覆盖本地 NSD、通知输入、应用元数据与诊断且不暗示上传。
 - [X] T073 复核实际解析图、许可证/NOTICE、维护风险、体积和移除路径于 `docs/第三方依赖审查.md` 和 `docs/第三方依赖与许可证.md`
   - **验收**: 文档与 Gradle 实际解析结果一致；ZXing/apk-parser 与传递依赖无遗漏，`spake2-java` 阻断仍存在时明确保留发布 BLOCKED。
-- [ ] T073A 修复 T074 首轮发现的 NSD library lint 静态分析误报于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/AndroidNsdDiscoveryAdapter.kt`
+- [X] T073A 修复 T074 首轮发现的 NSD library lint 静态分析误报于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/AndroidNsdDiscoveryAdapter.kt`
   - **验收**: 只对已有 App Manifest 权限、API 33/34 分支与结构化 `SecurityException` 降级覆盖的平台调用添加窄范围说明/抑制；不新增权限或 baseline，core discovery tests 与 `:core:adb:lintDebug` 通过。
 - [ ] T074 按 `specs/004-wireless-device-insights/quickstart.md` 运行全量单元测试、lint、Debug assemble、merged Manifest 与断链/敏感值扫描，并记录实际输出于 `docs/archive/releases/v0.04/verification.md`
   - **验收**: 设置 `JAVA_HOME=C:\Users\Richard\.gradle\sheen-jdk21` 后命令结果、失败项和未运行项均逐项记录；不得把自动化通过写成真机通过。
