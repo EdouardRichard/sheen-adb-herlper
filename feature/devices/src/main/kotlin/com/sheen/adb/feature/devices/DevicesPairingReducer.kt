@@ -200,6 +200,9 @@ internal class DevicesPairingReducer {
         state: DevicesPairingState,
         openingWirelessSettings: Boolean,
     ): DevicesPairingReduction {
+        if (!state.localWindowActive && state.phase.isTerminal()) {
+            return DevicesPairingReduction(state)
+        }
         if (openingWirelessSettings && state.localWindowActive) {
             return DevicesPairingReduction(state, listOf(DevicesPairingEffect.KeepLocalWindow))
         }
@@ -339,6 +342,18 @@ internal class DevicesPairingReducer {
             failure = failure,
             codeFallbackAvailable = codeFallbackAvailable,
             awaitingSessionReplacementConfirmation = false,
+            localDiscoveryStatus = if (state.isLocalMode) {
+                LocalPairingDiscoveryStatus.STOPPED
+            } else {
+                state.localDiscoveryStatus
+            },
+            localNotificationState = if (state.isLocalMode) {
+                LocalPairingNotificationState.RESULT
+            } else {
+                state.localNotificationState
+            },
+            localWindowActive = false,
+            requiresLocalTargetSelection = false,
         ),
         effects = effects.toList(),
     )
