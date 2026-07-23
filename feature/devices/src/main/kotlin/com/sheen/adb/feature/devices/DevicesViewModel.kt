@@ -10,6 +10,9 @@ import com.sheen.adb.core.AdbError
 import com.sheen.adb.core.AdbOperationResult
 import com.sheen.adb.core.AdbSessionManager
 import com.sheen.adb.core.EndpointParseResult
+import com.sheen.adb.core.LocalPairingControllerState
+import com.sheen.adb.core.LocalPairingStopReason
+import com.sheen.adb.core.LocalPairingWindowId
 import com.sheen.adb.core.PairingAttemptId
 import com.sheen.adb.core.PairingAttemptPhase
 import com.sheen.adb.core.PairingMethod
@@ -48,6 +51,7 @@ data class DevicesUiState(
     val pendingDeleteProfile: DeviceProfile? = null,
     val pendingRenameProfile: DeviceProfile? = null,
     val renameInput: String = "",
+    val notificationPermissionRequestGeneration: Long = 0L,
 )
 
 class DevicesViewModel(
@@ -60,6 +64,9 @@ class DevicesViewModel(
     private var pairingAttemptIdFactory: () -> PairingAttemptId = {
         PairingAttemptId.of(UUID.randomUUID().toString())
     }
+    private var localPairingWindowIdFactory: () -> LocalPairingWindowId = {
+        LocalPairingWindowId.of(UUID.randomUUID().toString())
+    }
 
     internal constructor(
         manager: AdbSessionManager,
@@ -68,10 +75,14 @@ class DevicesViewModel(
         pairingReducer: DevicesPairingReducer,
         qrEncoder: QrMatrixEncoder,
         pairingAttemptIdFactory: () -> PairingAttemptId,
+        localPairingWindowIdFactory: () -> LocalPairingWindowId = {
+            LocalPairingWindowId.of(UUID.randomUUID().toString())
+        },
     ) : this(manager, repository, clock) {
         this.pairingReducer = pairingReducer
         this.qrEncoder = qrEncoder
         this.pairingAttemptIdFactory = pairingAttemptIdFactory
+        this.localPairingWindowIdFactory = localPairingWindowIdFactory
     }
 
     private val mutableState = MutableStateFlow(DevicesUiState())
@@ -81,6 +92,9 @@ class DevicesViewModel(
     private var operation: Job? = null
     private var operationGeneration = 0L
     private var activeQrAttemptId: PairingAttemptId? = null
+    private var activeLocalWindowId: LocalPairingWindowId? = null
+    private var localPairingGeneration = 0L
+    private var localSubmission: Job? = null
 
     init {
         viewModelScope.launch {
@@ -102,6 +116,9 @@ class DevicesViewModel(
         }
         viewModelScope.launch {
             repository.profiles.collect { profiles -> mutableState.update { it.copy(profiles = profiles) } }
+        }
+        viewModelScope.launch {
+            manager.localPairingController.state.collect(::handleLocalPairingControllerState)
         }
     }
 
@@ -161,6 +178,26 @@ class DevicesViewModel(
         }
     }
 
+    fun enterLocalPairingMode() {
+        mutableState.update {
+            it.copy(showPairing = true, pairingCode = "", inputError = null, notice = null)
+        }
+        reducePairing(DevicesPairingEvent.EnterLocalMode)
+    }
+
+    fun retryLocalPairingMode() {
+        clearPairingCode()
+        reducePairing(DevicesPairingEvent.RetryLocalMode)
+    }
+
+    fun onLocalNotificationPermissionResult(granted: Boolean) {
+        reducePairing(DevicesPairingEvent.NotificationPermissionResult(granted), handleEffects = false)
+    }
+
+    fun onLocalWirelessSettingsOpened() {
+        reducePairing(DevicesPairingEvent.LocalPageLeft(openingWirelessSettings = true))
+    }
+
     fun updatePairingEndpoint(value: String) = mutableState.update {
         it.copy(pairingEndpointInput = value, inputError = null)
     }
@@ -172,6 +209,10 @@ class DevicesViewModel(
     }
 
     fun pair() {
+        if (mutablePairingState.value.isLocalMode) {
+            submitLocalPairingCode()
+            return
+        }
         val current = mutableState.value
         val endpoint = parse(current.pairingEndpointInput) ?: return
         if (current.pairingCode.length != SIX_DIGIT_CODE_LENGTH) {
@@ -209,7 +250,47 @@ class DevicesViewModel(
     }
 
     internal fun onPairingPageLeft() {
+        if (mutablePairingState.value.isLocalMode) {
+            reducePairing(DevicesPairingEvent.LocalPageLeft(openingWirelessSettings = false))
+            return
+        }
         cancelPairingOperation(markCancelled = hasNonTerminalPairing())
+    }
+
+    fun submitLocalPairingCode() {
+        val windowId = activeLocalWindowId
+        if (windowId == null) {
+            clearPairingCode()
+            mutableState.update { it.copy(inputError = "本机配对窗口不可用，请重试") }
+            return
+        }
+        val reduction = reducePairing(DevicesPairingEvent.SubmitCode, handleEffects = false)
+        clearPairingCode()
+        val submit = reduction.effects.singleOrNull() as? DevicesPairingEffect.SubmitCode
+        if (submit == null) {
+            mutableState.update { it.copy(inputError = "配对码必须是 6 位数字") }
+            return
+        }
+        val generation = localPairingGeneration
+        localSubmission?.cancel()
+        localSubmission = viewModelScope.launch {
+            try {
+                when (val result = manager.localPairingController.submit(windowId, submit.secret)) {
+                    is AdbOperationResult.Success -> if (isCurrentLocalWindow(generation, windowId)) {
+                        reducePairing(DevicesPairingEvent.Succeeded, handleEffects = false)
+                    }
+                    is AdbOperationResult.Failure -> if (isCurrentLocalWindow(generation, windowId)) {
+                        reducePairing(terminalPairingEvent(result.error), handleEffects = false)
+                    }
+                    AdbOperationResult.Cancelled -> if (isCurrentLocalWindow(generation, windowId)) {
+                        reducePairing(DevicesPairingEvent.Cancelled, handleEffects = false)
+                    }
+                }
+            } finally {
+                submit.secret.clear()
+                clearPairingCode()
+            }
+        }
     }
 
     internal fun confirmPairingSessionReplacement() {
@@ -336,8 +417,84 @@ class DevicesViewModel(
             }
             DevicesPairingEffect.CancelCurrent -> cancelPairingOperation(markCancelled = false)
             is DevicesPairingEffect.SubmitCode -> effect.secret.clear()
+            DevicesPairingEffect.StartLocalWindow -> startLocalPairingWindow()
+            DevicesPairingEffect.RequestNotificationPermission -> mutableState.update {
+                it.copy(notificationPermissionRequestGeneration = it.notificationPermissionRequestGeneration + 1L)
+            }
+            DevicesPairingEffect.KeepLocalWindow -> Unit
+            DevicesPairingEffect.StopLocalWindow -> stopLocalPairingWindow()
         }
     }
+
+    private fun startLocalPairingWindow() {
+        activeLocalWindowId?.let(manager.localPairingController::cancel)
+        localSubmission?.cancel()
+        localSubmission = null
+        val generation = ++localPairingGeneration
+        val attemptId = pairingAttemptIdFactory()
+        val windowId = localPairingWindowIdFactory()
+        activeLocalWindowId = windowId
+        when (val result = manager.localPairingController.start(attemptId, windowId)) {
+            is AdbOperationResult.Success -> Unit
+            is AdbOperationResult.Failure -> if (isCurrentLocalWindow(generation, windowId)) {
+                activeLocalWindowId = null
+                reducePairing(terminalPairingEvent(result.error), handleEffects = false)
+            }
+            AdbOperationResult.Cancelled -> if (isCurrentLocalWindow(generation, windowId)) {
+                activeLocalWindowId = null
+                reducePairing(DevicesPairingEvent.Cancelled, handleEffects = false)
+            }
+        }
+    }
+
+    private fun stopLocalPairingWindow() {
+        val windowId = activeLocalWindowId
+        activeLocalWindowId = null
+        localPairingGeneration++
+        localSubmission?.cancel()
+        localSubmission = null
+        if (windowId != null) manager.localPairingController.cancel(windowId)
+    }
+
+    private fun handleLocalPairingControllerState(controllerState: LocalPairingControllerState) {
+        val activeWindowId = activeLocalWindowId ?: return
+        val window = controllerState.window ?: return
+        if (window.windowId != activeWindowId) return
+        reducePairing(
+            DevicesPairingEvent.LocalDiscoveryChanged(controllerState.discoveryStatus),
+            handleEffects = false,
+        )
+        controllerState.notificationDecision?.let { decision ->
+            reducePairing(
+                DevicesPairingEvent.LocalNotificationChanged(
+                    state = decision.state,
+                    suggestNativeNotificationStyle = decision.suggestNativeNotificationStyle,
+                ),
+                handleEffects = false,
+            )
+        }
+        controllerState.stopReason?.let { reason ->
+            val event = when (reason) {
+                LocalPairingStopReason.SUCCEEDED -> DevicesPairingEvent.Succeeded
+                LocalPairingStopReason.CANCELLED -> DevicesPairingEvent.Cancelled
+                LocalPairingStopReason.DEADLINE_REACHED,
+                LocalPairingStopReason.SYSTEM_TIMEOUT,
+                -> DevicesPairingEvent.Expired
+                LocalPairingStopReason.SERVICE_LOST,
+                LocalPairingStopReason.SESSION_CHANGED,
+                LocalPairingStopReason.FAILED,
+                -> DevicesPairingEvent.Failed
+            }
+            activeLocalWindowId = null
+            localPairingGeneration++
+            reducePairing(event, handleEffects = false)
+        }
+    }
+
+    private fun isCurrentLocalWindow(
+        generation: Long,
+        windowId: LocalPairingWindowId,
+    ): Boolean = generation == localPairingGeneration && activeLocalWindowId == windowId
 
     private suspend fun runQrPairing(generation: Long) {
         var attemptId: PairingAttemptId? = null
@@ -504,6 +661,7 @@ class DevicesViewModel(
     private fun clearPairingCode() = mutableState.update { it.copy(pairingCode = "") }
 
     override fun onCleared() {
+        stopLocalPairingWindow()
         cancelPairingOperation(markCancelled = hasNonTerminalPairing())
         super.onCleared()
     }
