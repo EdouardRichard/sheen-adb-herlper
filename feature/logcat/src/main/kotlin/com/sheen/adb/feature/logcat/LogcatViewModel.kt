@@ -9,6 +9,9 @@ import com.sheen.adb.core.AdbOperationResult
 import com.sheen.adb.core.AdbSessionManager
 import com.sheen.adb.core.LogcatConfig
 import com.sheen.adb.core.LogcatLevel
+import com.sheen.adb.core.StructuredLogcatKind
+import com.sheen.adb.core.StructuredLogcatLevel
+import com.sheen.adb.core.StructuredLogcatRecord
 import com.sheen.adb.data.TextExporter
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -18,9 +21,21 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
+enum class LogcatAnalysisStatus {
+    DISCONNECTED,
+    READY,
+    LOADING_PROCESSES,
+    CAPTURING,
+    PAUSED,
+    STOPPED,
+    CANCELLED,
+    ERROR,
+}
+
 data class LogcatUiState(
     val isConnected: Boolean = false,
     val sessionId: String? = null,
+    val processGeneration: Long = 0,
     val isCapturing: Boolean = false,
     val isPaused: Boolean = false,
     val minimumLevel: LogcatLevel = LogcatLevel.INFO,
@@ -29,18 +44,30 @@ data class LogcatUiState(
         com.sheen.adb.core.LogcatBuffer.SYSTEM,
         com.sheen.adb.core.LogcatBuffer.CRASH,
     ),
+    val levels: Set<StructuredLogcatLevel> = emptySet(),
+    val tagQuery: String = "",
     val keyword: String = "",
+    val pidQuery: String = "",
+    val processQuery: String = "",
+    val applicationQuery: String = "",
+    val visibleRecords: List<StructuredLogcatRecord> = emptyList(),
     val visibleLines: List<String> = emptyList(),
     val droppedOldest: Boolean = false,
+    val parseDegraded: Boolean = false,
+    val processDegradedReason: String? = null,
+    val status: LogcatAnalysisStatus = LogcatAnalysisStatus.DISCONNECTED,
     val error: AdbError? = null,
     val exportNotice: String? = null,
-)
+) {
+    val filter: LogcatAnalysisFilter
+        get() = LogcatAnalysisFilter(levels, tagQuery, keyword, pidQuery, processQuery, applicationQuery)
+}
 
 class LogcatViewModel(
     private val manager: AdbSessionManager,
     private val exporter: TextExporter,
 ) : ViewModel() {
-    private val window = LogcatWindow()
+    private var window: LogcatAnalysisWindow? = null
     private val mutableState = MutableStateFlow(LogcatUiState())
     val state: StateFlow<LogcatUiState> = mutableState.asStateFlow()
     private var capture: Job? = null
@@ -51,24 +78,28 @@ class LogcatViewModel(
         viewModelScope.launch {
             manager.connectionState.collect { connection ->
                 val connected = connection as? AdbConnectionState.Connected
-                if (connected?.sessionId != mutableState.value.sessionId) {
-                    stop()
-                    window.reset()
+                if (connected?.sessionId != mutableState.value.sessionId || connected == null) {
+                    stopCapture(clearWindow = true)
                     mutableState.value = mutableState.value.resetForSession(
                         isConnected = connected != null,
                         sessionId = connected?.sessionId,
                     )
-                } else if (connected == null) {
-                    stop()
-                    window.reset()
-                    mutableState.value = mutableState.value.resetForSession(false, null)
-                } else mutableState.update { it.copy(isConnected = true) }
+                } else {
+                    mutableState.update { it.copy(isConnected = true) }
+                }
             }
         }
     }
 
-    fun setForeground(value: Boolean) { foreground = value; if (!value) stop() }
-    fun setLevel(level: LogcatLevel) { if (!mutableState.value.isCapturing) mutableState.update { it.copy(minimumLevel = level) } }
+    fun setForeground(value: Boolean) {
+        foreground = value
+        if (!value) stopCapture(clearWindow = true)
+    }
+
+    fun setLevel(level: LogcatLevel) {
+        if (!mutableState.value.isCapturing) mutableState.update { it.copy(minimumLevel = level) }
+    }
+
     fun toggleBuffer(value: com.sheen.adb.core.LogcatBuffer) {
         if (mutableState.value.isCapturing) return
         mutableState.update { current ->
@@ -76,10 +107,30 @@ class LogcatViewModel(
             current.copy(buffers = updated.takeIf { it.isNotEmpty() } ?: current.buffers)
         }
     }
-    fun updateKeyword(value: String) {
-        window.updateKeyword(value)
-        mutableState.update { it.copy(keyword = value) }
-        publish()
+
+    fun toggleAnalysisLevel(value: StructuredLogcatLevel) = updateFilter { current ->
+        current.copy(levels = if (value in current.levels) current.levels - value else current.levels + value)
+    }
+
+    fun updateTagQuery(value: String) = updateFilter { it.copy(tagQuery = value.take(MAX_QUERY_LENGTH)) }
+
+    fun updateKeyword(value: String) = updateFilter { it.copy(keyword = value.take(MAX_QUERY_LENGTH)) }
+
+    fun updatePidQuery(value: String) = updateFilter { it.copy(pidQuery = value.take(MAX_QUERY_LENGTH)) }
+
+    fun updateProcessQuery(value: String) = updateFilter { it.copy(processQuery = value.take(MAX_QUERY_LENGTH)) }
+
+    fun updateApplicationQuery(value: String) = updateFilter { it.copy(applicationQuery = value.take(MAX_QUERY_LENGTH)) }
+
+    fun clearFilters() = updateFilter {
+        it.copy(
+            levels = emptySet(),
+            tagQuery = "",
+            keyword = "",
+            pidQuery = "",
+            processQuery = "",
+            applicationQuery = "",
+        )
     }
 
     fun start() {
@@ -87,29 +138,47 @@ class LogcatViewModel(
         if (!foreground || !current.isConnected || current.isCapturing || current.buffers.isEmpty()) return
         val captureSessionId = current.sessionId ?: return
         val generation = ++captureGeneration
-        window.resume()
-        mutableState.update { it.copy(isCapturing = true, isPaused = false, error = null, exportNotice = null) }
+        mutableState.update {
+            it.copy(
+                isCapturing = true,
+                isPaused = false,
+                status = LogcatAnalysisStatus.LOADING_PROCESSES,
+                error = null,
+                exportNotice = null,
+            )
+        }
         capture = viewModelScope.launch {
-            val config = LogcatConfig(current.minimumLevel, current.buffers)
             try {
-                manager.streamLogcat(config).collect { result ->
-                    if (generation != captureGeneration || mutableState.value.sessionId != captureSessionId) {
-                        return@collect
-                    }
-                    when (result) {
-                        is AdbOperationResult.Success -> {
-                            val prefix = if (result.value.fromStandardError) "[stderr] " else ""
-                            window.add(prefix + result.value.text)
-                            if (!mutableState.value.isPaused) publish()
+                when (val analysis = manager.loadProcessAnalysis(captureSessionId)) {
+                    is AdbOperationResult.Success -> {
+                        if (!isCurrent(captureSessionId, generation) || analysis.value.sessionId != captureSessionId) return@launch
+                        val analysisWindow = LogcatAnalysisWindow(captureSessionId, analysis.value.generation)
+                        analysisWindow.updateFilter(mutableState.value.filter)
+                        window = analysisWindow
+                        mutableState.update {
+                            it.copy(
+                                processGeneration = analysis.value.generation,
+                                visibleRecords = emptyList(),
+                                visibleLines = emptyList(),
+                                droppedOldest = false,
+                                parseDegraded = false,
+                                processDegradedReason = analysis.value.degradedReason,
+                                status = LogcatAnalysisStatus.CAPTURING,
+                            )
                         }
-                        is AdbOperationResult.Failure -> mutableState.update { it.copy(error = result.error) }
-                        AdbOperationResult.Cancelled -> Unit
+                        collectStructured(captureSessionId, generation, analysis.value.generation, current)
+                    }
+                    is AdbOperationResult.Failure -> mutableState.updateIfCurrent(captureSessionId, generation) {
+                        it.copy(isCapturing = false, status = LogcatAnalysisStatus.ERROR, error = analysis.error)
+                    }
+                    AdbOperationResult.Cancelled -> mutableState.updateIfCurrent(captureSessionId, generation) {
+                        it.copy(isCapturing = false, status = LogcatAnalysisStatus.CANCELLED)
                     }
                 }
             } catch (error: CancellationException) {
                 throw error
             } finally {
-                if (generation == captureGeneration && mutableState.value.sessionId == captureSessionId) {
+                if (isCurrent(captureSessionId, generation)) {
                     mutableState.update { it.stopped() }
                     capture = null
                 }
@@ -117,50 +186,143 @@ class LogcatViewModel(
         }
     }
 
-    fun stop() {
-        captureGeneration++
+    private suspend fun collectStructured(
+        sessionId: String,
+        generation: Long,
+        processGeneration: Long,
+        initial: LogcatUiState,
+    ) {
+        val config = LogcatConfig(initial.minimumLevel, initial.buffers)
+        manager.streamStructuredLogcat(config, sessionId, processGeneration).collect { result ->
+            if (!isCurrent(sessionId, generation)) return@collect
+            when (result) {
+                is AdbOperationResult.Success -> {
+                    if (window?.add(result.value) == true && !mutableState.value.isPaused) publish()
+                }
+                is AdbOperationResult.Failure -> mutableState.update {
+                    it.copy(status = LogcatAnalysisStatus.ERROR, error = result.error)
+                }
+                AdbOperationResult.Cancelled -> mutableState.update {
+                    it.copy(status = LogcatAnalysisStatus.CANCELLED)
+                }
+            }
+        }
+    }
+
+    fun stop() = stopCapture(clearWindow = false)
+
+    private fun stopCapture(clearWindow: Boolean) {
+        val wasActive = mutableState.value.isCapturing
+        captureGeneration += 1
         capture?.cancel()
         capture = null
-        mutableState.update { it.stopped() }
-        publish()
+        if (clearWindow) {
+            window?.reset()
+            window = null
+            mutableState.update {
+                it.copy(
+                    processGeneration = 0,
+                    visibleRecords = emptyList(),
+                    visibleLines = emptyList(),
+                    droppedOldest = false,
+                    parseDegraded = false,
+                    processDegradedReason = null,
+                ).stopped()
+            }
+        } else {
+            mutableState.update { current ->
+                current.stopped().copy(
+                    status = if (wasActive) LogcatAnalysisStatus.STOPPED else current.status,
+                )
+            }
+            publish()
+        }
     }
 
     fun togglePause() {
+        val activeWindow = window ?: return
+        if (!mutableState.value.isCapturing) return
         if (mutableState.value.isPaused) {
-            window.resume()
-            mutableState.update { it.copy(isPaused = false) }
+            activeWindow.resume()
+            mutableState.update { it.copy(isPaused = false, status = LogcatAnalysisStatus.CAPTURING) }
             publish()
         } else {
-            window.pause()
-            mutableState.update { it.copy(isPaused = true) }
+            activeWindow.pause()
+            mutableState.update { it.copy(isPaused = true, status = LogcatAnalysisStatus.PAUSED) }
         }
     }
 
-    fun clear() { window.clear(); publish() }
+    fun clear() {
+        window?.clear()
+        publish()
+    }
 
     fun export(target: Uri) {
-        val text = mutableState.value.visibleLines.joinToString("\n")
+        val text = visibleText()
         viewModelScope.launch {
             val success = exporter.writeUtf8(target, text)
-            mutableState.update { it.copy(exportNotice = if (success) "导出完成" else "导出失败，请重新选择位置") }
+            mutableState.update {
+                it.copy(exportNotice = if (success) "导出完成" else "导出失败，请重新选择位置")
+            }
         }
     }
 
-    fun visibleText(): String = mutableState.value.visibleLines.joinToString("\n")
+    fun visibleText(): String = window?.visibleText() ?: mutableState.value.visibleLines.joinToString("\n")
+
+    private fun updateFilter(transform: (LogcatUiState) -> LogcatUiState) {
+        mutableState.update(transform)
+        window?.updateFilter(mutableState.value.filter)
+        publish()
+    }
 
     private fun publish() = mutableState.update { current ->
+        val records = window?.snapshot().orEmpty()
         current.copy(
-            visibleLines = window.snapshot(),
-            droppedOldest = window.droppedOldest,
+            visibleRecords = records,
+            visibleLines = records.map { it.rawText },
+            droppedOldest = window?.droppedOldest == true,
+            parseDegraded = records.any { it.kind != StructuredLogcatKind.PARSED },
         )
     }
 
-    override fun onCleared() { stop(); window.reset(); super.onCleared() }
+    private fun isCurrent(sessionId: String, generation: Long): Boolean =
+        generation == captureGeneration && mutableState.value.sessionId == sessionId
+
+    private inline fun MutableStateFlow<LogcatUiState>.updateIfCurrent(
+        sessionId: String,
+        generation: Long,
+        transform: (LogcatUiState) -> LogcatUiState,
+    ) {
+        update { if (isCurrent(sessionId, generation)) transform(it) else it }
+    }
+
+    override fun onCleared() {
+        stopCapture(clearWindow = true)
+        super.onCleared()
+    }
+
+    private companion object {
+        const val MAX_QUERY_LENGTH = 255
+    }
 }
 
-internal fun LogcatUiState.stopped(): LogcatUiState = copy(isCapturing = false, isPaused = false)
+internal fun LogcatUiState.stopped(): LogcatUiState = copy(
+    isCapturing = false,
+    isPaused = false,
+    status = when (status) {
+        LogcatAnalysisStatus.CANCELLED,
+        LogcatAnalysisStatus.ERROR,
+        LogcatAnalysisStatus.DISCONNECTED,
+        -> status
+        else -> LogcatAnalysisStatus.STOPPED
+    },
+)
 
 internal fun LogcatUiState.resetForSession(
     isConnected: Boolean,
     sessionId: String?,
-): LogcatUiState = LogcatUiState(isConnected = isConnected, sessionId = sessionId)
+): LogcatUiState = LogcatUiState(
+    isConnected = isConnected,
+    sessionId = sessionId,
+    status = if (isConnected) LogcatAnalysisStatus.READY else LogcatAnalysisStatus.DISCONNECTED,
+)
