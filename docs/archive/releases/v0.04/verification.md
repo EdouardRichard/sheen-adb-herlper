@@ -86,6 +86,18 @@ Debug merged Manifest 的权限恰为：
 
 脱敏失败分类只有 `ENVIRONMENT_NO_DEVICE`；它不是功能失败样本，不进入成功率分母。SC001、SC004、SC010、SC011、SC013 维持 `NOT_RUN`，不得由 QR/Kadb 单元测试替代。
 
+### 4.2 T076 本机通知与 LAN 固定协议
+
+同一环境检查确认设备数为 0，因此无法打开系统无线调试、锁屏/解锁、切换 OEM 通知样式，或准备 15 个真实 DNS-SD 服务及 IPv4/IPv6/网络切换条件。
+
+| 协议 | 计划次数 | 实际次数 | 成功次数 | 成功率 | P95 | 状态 |
+|---|---:|---:|---:|---|---|---|
+| 本机模式启动/5 秒结果 | 20 | 0 | 0 | N/A | N/A | NOT_RUN |
+| 配对通知/3 秒到达 | 20 | 0 | 0 | N/A | N/A | NOT_RUN |
+| 每轮 15 服务 LAN 发现 | 20 | 0 | 0 | N/A | N/A | NOT_RUN |
+
+Android 11–16、至少两种 OEM 样式、锁屏到解锁、IPv4/IPv6 和网络切换均为 `NOT_RUN`。SC002、SC003、SC005、SC015、SC018 不作通过判断；自动化只证明 deadline、token、锁屏决策、generation 和资源清理策略。
+
 ## 5. T074 结论
 
 - 自动化与 Debug 构建：**PASS_WITH_WARNINGS**。
