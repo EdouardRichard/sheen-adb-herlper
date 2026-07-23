@@ -155,6 +155,8 @@
   - **验收**: T037、T025 与既有 ViewModel 回归通过；5 秒内交付核心发现状态，应用内输入始终存在且通知/应用提交共用 attemptId，旧 window/generation 结果无效。
 - [X] T039A [US2] 扩充 bridge 测试并使 App bridge 幂等同步既有 controller window 的 short-service 生命周期于 `app/src/test/kotlin/com/sheen/adbhelper/localpairing/LocalPairingAppBridgeTest.kt` 和 `app/src/main/kotlin/com/sheen/adbhelper/localpairing/LocalPairingAppBridge.kt`
   - **验收**: 测试先因同步 API 缺失失败再转绿；既有活动 window 只启动一次 service，终态/无 window 只停止一次，不重复创建 controller window，进程重建不恢复旧窗口。
+- [ ] T039B [US2] 增加本机终态清理回归并修正 reducer 于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/DevicesPairingReducerTest.kt` 和 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesPairingReducer.kt`
+  - **验收**: 测试先证明本机成功/失败/取消/过期/不支持仍残留活动 window，再转绿；所有终态原子停止本机发现、关闭通知窗口且不会被随后普通离页覆盖。
 - [ ] T039 [US2] 将平台 bridge、系统设置入口、通知授权结果和本机状态接入 UI 于 `app/src/main/kotlin/com/sheen/adbhelper/SheenApp.kt` 和 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesScreen.kt`
   - **验收**: T037、`:app:testDebugUnitTest` 与 `:feature:devices:testDebugUnitTest` 通过；通知拒绝/关闭/OEM 不兼容仍能从应用内提交，锁屏 UI/通知不泄漏敏感值，解锁后无需重启窗口即可继续输入，既有手动 localhost 入口保留。
 
@@ -320,7 +322,7 @@ flowchart TD
 
 - T005 → T006；T007 → T008；T009 → T010；T011 → T012；T013 → T014 → T014A → T015 → T016。
 - US1：T017 → T018 → T019 → T020A → T020；T021 → T022；T023 → T024 → T024A → T024B → T024C → T024D → T024E → T025 → T026；T027 → T028。
-- US2：T029 → T030；T031 → T032A → T032；T033 → T034；T035 → T036；T037 → T038 → T038A → T039A → T039。
+- US2：T029 → T030；T031 → T032A → T032；T033 → T034；T035 → T036；T037 → T038 → T038A → T039A → T039B → T039。
 - US3：T040 → T041；T042 → T043 → T044 → T045；T046 → T047。
 - US4：T048 → T049；T050 → T051 → T052 → T053；T054 → T055；T056 → T057。
 - US5：T058 → T059；T060 → T061 → T062 → T063；T064 → T065；T066 → T067；T068 → T069。
@@ -371,7 +373,7 @@ flowchart TD
 
 ```text
 并行启动 T029（core 通知决策测试）、T031（core 本机窗口测试）、T033（Android 平台桥测试）和 T035（App 装配测试）。
-对应实现 T030/T032/T034/T036 分别转绿后，再执行 T037→T038→T038A→T039A→T039 的 Feature/UI 接线。
+对应实现 T030/T032/T034/T036 分别转绿后，再执行 T037→T038→T038A→T039A→T039B→T039 的 Feature/UI 接线。
 ```
 
 ### US3
