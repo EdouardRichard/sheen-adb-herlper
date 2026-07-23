@@ -211,7 +211,7 @@
   - **验收**: 目标测试因 reader/loader 缺失而失败；fake shell 只接受核心生成命令，fake Sync 证明成功/异常/取消均关闭，且无 cache/files/external storage 或公开 SAF 下载调用。
 - [X] T050A [US4] 修正 metadata reader 取消测试的协程调度夹具于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationMetadataLoaderTest.kt`
   - **验收**: 取消协程在独立 dispatcher 启动后才由测试线程等待 fake Sync 进入；用例不因 `runBlocking` 同线程饥饿而误报，仍证明取消关闭 stream。
-- [ ] T051 [US4] 实现内部有界 APK reader 与渐进 metadata loader 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/applications/BoundedRemoteApkReader.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/applications/ApplicationMetadataLoader.kt`
+- [X] T051 [US4] 实现内部有界 APK reader 与渐进 metadata loader 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/applications/BoundedRemoteApkReader.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/applications/ApplicationMetadataLoader.kt`
   - **验收**: T050 通过；只接受 PackageManager 解析路径并复用内部 Sync adapter，逐包处理且总预算 10 秒，超限立即停止接收，所有路径关闭 stream；取消/Session change 后不交付旧 update并释放 APK bytes/icon cache。
 - [ ] T052 [US4] 先写 manager metadata flow 失败测试，覆盖包列表先返回、逐项 update、`(sessionId,userId,packageName)` 归属、错误分类和既有应用操作不变于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationMetadataSessionManagerTest.kt`
   - **验收**: 目标测试因 manager 尚无 metadata flow 而失败；既有 force-stop/enable/disable 测试仍保持绿色。
