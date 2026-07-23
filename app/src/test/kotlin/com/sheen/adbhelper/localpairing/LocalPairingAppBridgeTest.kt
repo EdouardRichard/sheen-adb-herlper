@@ -101,6 +101,29 @@ internal class LocalPairingAppBridgeTest {
     }
 
     @Test
+    fun `existing controller window synchronizes one service without creating another window`() {
+        val controller = FakeController()
+        val service = FakeServiceLifecycle()
+        val bridge = LocalPairingAppBridge(controller, service)
+        controller.publishExistingWindow(ATTEMPT_ID, WINDOW_ID)
+
+        bridge.synchronizeService()
+        bridge.synchronizeService()
+
+        assertEquals(controller.startCalls, 0)
+        assertEquals(service.startCalls, 1)
+        assertEquals(service.stopCalls, 0)
+
+        controller.publishStopped()
+        bridge.synchronizeService()
+        bridge.synchronizeService()
+
+        assertEquals(service.startCalls, 1)
+        assertEquals(service.stopCalls, 1)
+        assertFalse(bridge.hasActiveWindow())
+    }
+
+    @Test
     fun `bridge and application assembly do not copy business deadline token or persistence state`() {
         val bridgeSource = String(
             Files.readAllBytes(
@@ -200,6 +223,27 @@ internal class LocalPairingAppBridgeTest {
         }
 
         override fun onSystemTimeout(windowId: LocalPairingWindowId): AdbOperationResult<Unit> = cancel(windowId)
+
+        fun publishExistingWindow(
+            attemptId: PairingAttemptId,
+            windowId: LocalPairingWindowId,
+        ) {
+            mutableState.value = LocalPairingControllerState(
+                window = LocalPairingWindow(
+                    windowId = windowId,
+                    attemptId = attemptId,
+                    startedAtMillis = 0L,
+                    deadlineMillis = 120_000L,
+                ),
+                discoveryStatus = LocalPairingDiscoveryStatus.SEARCHING,
+            )
+        }
+
+        fun publishStopped() {
+            mutableState.value = LocalPairingControllerState(
+                discoveryStatus = LocalPairingDiscoveryStatus.STOPPED,
+            )
+        }
     }
 
     private companion object {
