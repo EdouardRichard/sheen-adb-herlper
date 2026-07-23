@@ -174,6 +174,8 @@
 
 - [ ] T040 [P] [US3] 先写 LAN manager 失败测试，覆盖前台 10 秒窗口、15 个服务、重复/丢失、网络切换、取消、后台停止、端点点击后重新确认、不自动 pair/connect，以及成功 TLS/ADB Session 后把同一主机公钥指纹生成的 opaque identity 同时回填 attempt 关联的 pairing observation 与最终 connect observation 于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/LanDiscoverySessionManagerTest.kt`
   - **验收**: 目标测试在 foundational manager 上因 LAN/identity 策略未完成而失败；fake adapter 记录的 service type 仅为两个 TLS 类型且无探测请求，只有同一 attempt 且指纹一致的 pairing/connect 条目合并，未连接或指纹不一致的条目保持独立。
+- [ ] T040A [US3] 定义带 generation/observation/attempt 归属的 discovered target、配对和连接公共契约于 `core/adb/src/main/kotlin/com/sheen/adb/core/WirelessDiscoveryModels.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbSessionManager.kt`
+  - **验收**: T040 从缺失 API 转为 manager 策略失败；默认实现对配对清除 secret 并结构化拒绝，Feature 无需也不能拼接发现 endpoint，既有 fake manager 继续编译。
 - [ ] T041 [US3] 完成 LAN discovery 生命周期、端点重新确认与 attempt 两端已验证 Session 身份回填于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/discovery/WirelessDiscoveryReducer.kt`
   - **验收**: T040、T005、T013 和全部既有 manager 测试通过；离页/后台/取消后 3 秒内停止，过期端点结构化失败，同一 attempt 的 pairing/connect observation 仅在已验证公钥指纹相同后合并，opaque identity 不进入日志/持久化且不自动替换 Session。
 - [ ] T042 [P] [US3] 先写设备发现 reducer 失败测试，覆盖 scanning/content/empty/error/cancelled、可靠合并、未知关系标记、lost/port-changed、手动回退和选择确认于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/DevicesDiscoveryReducerTest.kt`
@@ -323,7 +325,7 @@ flowchart TD
 - T005 → T006；T007 → T008；T009 → T010；T011 → T012；T013 → T014 → T014A → T015 → T016。
 - US1：T017 → T018 → T019 → T020A → T020；T021 → T022；T023 → T024 → T024A → T024B → T024C → T024D → T024E → T025 → T026；T027 → T028。
 - US2：T029 → T030；T031 → T032A → T032；T033 → T034；T035 → T036；T037 → T038 → T038A → T039A → T039B → T039。
-- US3：T040 → T041；T042 → T043 → T044 → T045；T046 → T047。
+- US3：T040 → T040A → T041；T042 → T043 → T044 → T045；T046 → T047。
 - US4：T048 → T049；T050 → T051 → T052 → T053；T054 → T055；T056 → T057。
 - US5：T058 → T059；T060 → T061 → T062 → T063；T064 → T065；T066 → T067；T068 → T069。
 
