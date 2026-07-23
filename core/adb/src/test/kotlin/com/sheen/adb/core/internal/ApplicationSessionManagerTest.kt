@@ -23,7 +23,9 @@ class ApplicationSessionManagerTest {
         val client = ScriptedClient { command ->
             when (command) {
                 "am get-current-user" -> response("10\n")
-                "pm list packages -3 --user 10" -> response("package:com.example.one\npackage:com.example.two\n")
+                "pm list packages -3 -U --user 10" -> response(
+                    "package:com.example.one uid:1010123\npackage:com.example.two uid:1010124\n",
+                )
                 "pm list packages -3 -d --user 10" -> response("package:com.example.two\n")
                 else -> response("ok\n")
             }
@@ -33,6 +35,7 @@ class ApplicationSessionManagerTest {
         val result = manager.listApplications() as AdbOperationResult.Success
         assertEquals(result.value.userId, 10)
         assertEquals(result.value.applications.map { it.packageName }, listOf("com.example.one", "com.example.two"))
+        assertEquals(result.value.applications.map { it.androidUid }, listOf(1_010_123, 1_010_124))
         assertEquals(result.value.applications.map { it.enabledState }, listOf(RemoteApplicationEnabledState.ENABLED, RemoteApplicationEnabledState.DISABLED))
         assertTrue(result.value.applications.none { it.isSystem })
         assertTrue(result.value.unavailableFields.isNotEmpty())
@@ -60,7 +63,7 @@ class ApplicationSessionManagerTest {
         val client = ScriptedClient { command ->
             when (command) {
                 "am get-current-user" -> response("0\n")
-                "pm list packages -3 --user 0" -> response("package:com.example.client\n")
+                "pm list packages -3 -U --user 0" -> response("package:com.example.client uid:10123\n")
                 "pm list packages -3 -d --user 0" -> response(if (disabled) "package:com.example.client\n" else "")
                 "pm disable-user --user 0 com.example.client" -> response("Package com.example.client new state: disabled-user\n").also { disabled = true }
                 else -> response("ok\n")
@@ -84,7 +87,7 @@ class ApplicationSessionManagerTest {
         val policyClient = ScriptedClient { command ->
             when (command) {
                 "am get-current-user" -> response("0\n")
-                "pm list packages -3 --user 0" -> response("package:com.example.client\n")
+                "pm list packages -3 -U --user 0" -> response("package:com.example.client uid:10123\n")
                 "pm list packages -3 -d --user 0" -> response("")
                 "pm disable-user --user 0 com.example.client" -> response("Security exception", exitCode = 1)
                 else -> response("ok\n")
@@ -99,7 +102,9 @@ class ApplicationSessionManagerTest {
         val vanishedClient = ScriptedClient { command ->
             when (command) {
                 "am get-current-user" -> response("0\n")
-                "pm list packages -3 --user 0" -> response(if (listCount++ == 0) "package:com.example.client\n" else "")
+                "pm list packages -3 -U --user 0" -> response(
+                    if (listCount++ == 0) "package:com.example.client uid:10123\n" else "",
+                )
                 "pm list packages -3 -d --user 0" -> response("")
                 else -> response("ok\n")
             }
@@ -115,7 +120,7 @@ class ApplicationSessionManagerTest {
         val client = ScriptedClient { command ->
             when (command) {
                 "am get-current-user" -> response("0\n")
-                "pm list packages -3 --user 0" -> response("package:com.example.client\n")
+                "pm list packages -3 -U --user 0" -> response("package:com.example.client uid:10123\n")
                 "pm list packages -3 -d --user 0" -> response("")
                 "am force-stop --user 0 com.example.client" -> {
                     Thread.sleep(10_000)
@@ -138,7 +143,7 @@ class ApplicationSessionManagerTest {
         val emptyManager = connectedManager(ScriptedClient { command ->
             when (command) {
                 "am get-current-user" -> response("0\n")
-                "pm list packages -3 --user 0", "pm list packages -3 -d --user 0" -> response("")
+                "pm list packages -3 -U --user 0", "pm list packages -3 -d --user 0" -> response("")
                 else -> response("ok\n")
             }
         })
@@ -155,7 +160,7 @@ class ApplicationSessionManagerTest {
         val unsupportedManager = connectedManager(ScriptedClient { command ->
             when (command) {
                 "am get-current-user" -> response("0\n")
-                "pm list packages -3 --user 0", "cmd package list packages -3 --user 0" -> response("vendor noise")
+                "pm list packages -3 -U --user 0", "cmd package list packages -3 -U --user 0" -> response("vendor noise")
                 else -> response("ok\n")
             }
         })
@@ -167,7 +172,7 @@ class ApplicationSessionManagerTest {
         val localClient = ScriptedClient { command ->
             when (command) {
                 "am get-current-user" -> response("0\n")
-                "pm list packages -3 --user 0" -> response("package:com.sheen.adbhelper\n")
+                "pm list packages -3 -U --user 0" -> response("package:com.sheen.adbhelper uid:10123\n")
                 "pm list packages -3 -d --user 0" -> response("")
                 else -> response("ok\n")
             }
@@ -190,7 +195,7 @@ class ApplicationSessionManagerTest {
         val client = ScriptedClient { command ->
             when (command) {
                 "am get-current-user" -> response("12\n")
-                "pm list packages -3 --user 12" -> response("package:com.sensitive.client\n")
+                "pm list packages -3 -U --user 12" -> response("package:com.sensitive.client uid:1210123\n")
                 "pm list packages -3 -d --user 12" -> response("")
                 "am force-stop --user 12 com.sensitive.client" -> throw EOFException("sensitive output")
                 else -> response("ok\n")
@@ -212,7 +217,7 @@ class ApplicationSessionManagerTest {
         val client = ScriptedClient { command ->
             when (command) {
                 "am get-current-user" -> response("0\n")
-                "pm list packages -3 --user 0" -> response("package:com.example.client\n")
+                "pm list packages -3 -U --user 0" -> response("package:com.example.client uid:10123\n")
                 "pm list packages -3 -d --user 0" -> response("")
                 "am force-stop --user 0 com.example.client" -> {
                     started.set(true)
@@ -246,7 +251,7 @@ class ApplicationSessionManagerTest {
     private fun standardClient() = ScriptedClient { command ->
         when (command) {
             "am get-current-user" -> response("0\n")
-            "pm list packages -3 --user 0" -> response("package:com.example.client\n")
+            "pm list packages -3 -U --user 0" -> response("package:com.example.client uid:10123\n")
             "pm list packages -3 -d --user 0" -> response("")
             else -> response("ok\n")
         }
