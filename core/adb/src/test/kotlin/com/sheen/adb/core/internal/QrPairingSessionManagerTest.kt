@@ -235,6 +235,24 @@ class QrPairingSessionManagerTest {
         assertEquals(factory.calls.single().length, STANDARD_QR_PASSWORD_LENGTH)
     }
 
+    @Test
+    fun `starting a connection invalidates waiting QR material and public boundary hides raw pairing fields`() = runBlocking {
+        val factory = RecordingFactory()
+        val manager = qrManager(factory)
+        val attemptId = PairingAttemptId.of("manager-attempt-session-change")
+        val material = (
+            manager.createQrPairingAttempt(attemptId) as AdbOperationResult.Success<QrPairingMaterial>
+        ).value
+        val publicGetterNames = QrPairingMaterial::class.java.methods.map { it.name.lowercase() }
+
+        val connected = manager.connect(CONNECT_ENDPOINT)
+
+        assertTrue(connected is AdbOperationResult.Success<*>)
+        assertEquals(material.payload, null, "A Session change must invalidate waiting QR material")
+        assertTrue(manager.connectionState.value is AdbConnectionState.Connected)
+        assertTrue(publicGetterNames.none { "service" in it || "password" in it || "secret" in it })
+    }
+
     private fun qrManager(factory: RecordingFactory): DefaultAdbSessionManager = DefaultAdbSessionManager(
         clientFactory = factory,
         ioDispatcher = Dispatchers.Unconfined,
