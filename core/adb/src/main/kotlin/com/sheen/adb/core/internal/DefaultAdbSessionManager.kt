@@ -17,6 +17,7 @@ import com.sheen.adb.core.ApplicationMetadataStatus
 import com.sheen.adb.core.ApplicationMetadataUpdate
 import com.sheen.adb.core.ApplicationMutationResult
 import com.sheen.adb.core.ApplicationSnapshot
+import com.sheen.adb.core.AndroidUidIdentity
 import com.sheen.adb.core.DiagnosticRedactor
 import com.sheen.adb.core.DeviceOverview
 import com.sheen.adb.core.DynamicDeviceMetrics
@@ -1918,8 +1919,8 @@ internal class DefaultAdbSessionManager(
             )
         }
         val all = when (val parsed = queryPackageNames(userId, disabledOnly = false, timeout)) {
-            is PackageQueryResult.Names -> parsed.names
-            PackageQueryResult.Empty -> linkedSetOf()
+            is PackageQueryResult.Names -> parsed
+            PackageQueryResult.Empty -> PackageQueryResult.Names(linkedSetOf(), emptyMap())
             PackageQueryResult.CapacityExceeded -> return applicationFailure(
                 AdbError.ApplicationListCapacityExceeded,
                 session.endpoint,
@@ -1945,7 +1946,10 @@ internal class DefaultAdbSessionManager(
             is PackageQueryResult.OperationFailure -> return parsed.result
             PackageQueryResult.Cancelled -> return AdbOperationResult.Cancelled
         }
-        val applications = all.map { packageName ->
+        val applications = all.names.map { packageName ->
+            val androidUid = all.uidsByPackage[packageName]?.takeIf { rawUid ->
+                AndroidUidIdentity.fromRawUid(rawUid)?.userId == userId
+            }
             RemoteApplication(
                 packageName = packageName,
                 userId = userId,
@@ -1955,6 +1959,7 @@ internal class DefaultAdbSessionManager(
                     else -> RemoteApplicationEnabledState.ENABLED
                 },
                 isSystem = false,
+                androidUid = androidUid,
             )
         }
         val snapshot = ApplicationSnapshot(
@@ -2001,7 +2006,10 @@ internal class DefaultAdbSessionManager(
             when (val result = executeShell(command, timeout)) {
                 is AdbOperationResult.Success -> if (result.value.exitCode == 0) {
                     when (val parsed = ApplicationParsers.packageNames(result.value.stdout)) {
-                        is PackageNamesParse.Success -> return PackageQueryResult.Names(parsed.names)
+                        is PackageNamesParse.Success -> return PackageQueryResult.Names(
+                            parsed.names,
+                            parsed.uidsByPackage,
+                        )
                         PackageNamesParse.Empty -> return PackageQueryResult.Empty
                         PackageNamesParse.CapacityExceeded -> return PackageQueryResult.CapacityExceeded
                         PackageNamesParse.Malformed -> Unit
@@ -2079,7 +2087,10 @@ internal class DefaultAdbSessionManager(
     }
 
     private sealed interface PackageQueryResult {
-        data class Names(val names: LinkedHashSet<String>) : PackageQueryResult
+        data class Names(
+            val names: LinkedHashSet<String>,
+            val uidsByPackage: Map<String, Int?>,
+        ) : PackageQueryResult
         data class OperationFailure(val result: AdbOperationResult.Failure) : PackageQueryResult
         data object Empty : PackageQueryResult
         data object Unsupported : PackageQueryResult

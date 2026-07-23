@@ -165,8 +165,9 @@ class ApplicationMetadataSessionManagerTest {
         when {
             command == "am get-current-user" -> response("0\n")
             command.startsWith("pm list packages -3 -d --user 0") -> response("")
-            command.startsWith("pm list packages -3 --user 0") -> response(
-                packages.joinToString(separator = "\n", postfix = "\n") { "package:$it" },
+            command.startsWith("pm list packages -3 -U --user 0") -> response(
+                packages.mapIndexed { index, packageName -> "package:$packageName uid:${10_123 + index}" }
+                    .joinToString(separator = "\n", postfix = "\n"),
             )
             command.startsWith("am force-stop --user 0 ") -> response("")
             else -> response("ok\n")
