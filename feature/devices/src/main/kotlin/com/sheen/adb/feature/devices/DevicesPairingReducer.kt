@@ -3,6 +3,8 @@ package com.sheen.adb.feature.devices
 import com.sheen.adb.core.PairingAttemptPhase
 import com.sheen.adb.core.PairingMethod
 import com.sheen.adb.core.PairingSecret
+import com.sheen.adb.core.LocalPairingDiscoveryStatus
+import com.sheen.adb.core.LocalPairingNotificationState
 
 internal class DevicesPairingReducer {
     fun reduce(
@@ -54,6 +56,19 @@ internal class DevicesPairingReducer {
             DevicesPairingEvent.DismissSessionReplacement -> DevicesPairingReduction(
                 state.copy(awaitingSessionReplacementConfirmation = false),
             )
+            DevicesPairingEvent.EnterLocalMode -> enterLocalMode(state)
+            is DevicesPairingEvent.LocalDiscoveryChanged -> localDiscoveryChanged(state, event.status)
+            is DevicesPairingEvent.LocalNotificationChanged -> localNotificationChanged(
+                state,
+                event.state,
+                event.suggestNativeNotificationStyle,
+            )
+            is DevicesPairingEvent.NotificationPermissionResult -> notificationPermissionResult(
+                state,
+                event.granted,
+            )
+            DevicesPairingEvent.RetryLocalMode -> retryLocalMode(state)
+            is DevicesPairingEvent.LocalPageLeft -> localPageLeft(state, event.openingWirelessSettings)
         }
     }
 
@@ -71,7 +86,134 @@ internal class DevicesPairingReducer {
                 failure = null,
                 codeFallbackAvailable = false,
                 awaitingSessionReplacementConfirmation = false,
+                isLocalMode = false,
+                localDiscoveryStatus = LocalPairingDiscoveryStatus.IDLE,
+                localNotificationState = LocalPairingNotificationState.HIDDEN,
+                applicationInputAvailable = false,
+                suggestNativeNotificationStyle = false,
+                localWindowActive = false,
+                requiresLocalTargetSelection = false,
             ),
+        )
+    }
+
+    private fun enterLocalMode(state: DevicesPairingState): DevicesPairingReduction {
+        val requestNotificationPermission = !state.notificationPermissionRequested
+        return DevicesPairingReduction(
+            state = state.copy(
+                method = PairingMethod.SIX_DIGIT_CODE,
+                phase = PairingAttemptPhase.WAITING_FOR_CODE,
+                codeInput = "",
+                qrMatrix = null,
+                failure = null,
+                codeFallbackAvailable = false,
+                awaitingSessionReplacementConfirmation = false,
+                isLocalMode = true,
+                localDiscoveryStatus = LocalPairingDiscoveryStatus.SEARCHING,
+                localNotificationState = LocalPairingNotificationState.HIDDEN,
+                applicationInputAvailable = true,
+                notificationPermissionRequested = true,
+                suggestNativeNotificationStyle = false,
+                localWindowActive = true,
+                requiresLocalTargetSelection = false,
+            ),
+            effects = buildList {
+                add(DevicesPairingEffect.StartLocalWindow)
+                if (requestNotificationPermission) add(DevicesPairingEffect.RequestNotificationPermission)
+            },
+        )
+    }
+
+    private fun localDiscoveryChanged(
+        state: DevicesPairingState,
+        status: LocalPairingDiscoveryStatus,
+    ): DevicesPairingReduction {
+        if (!state.isLocalMode) return DevicesPairingReduction(state)
+        return DevicesPairingReduction(
+            state.copy(
+                localDiscoveryStatus = status,
+                applicationInputAvailable = true,
+                requiresLocalTargetSelection = status == LocalPairingDiscoveryStatus.AMBIGUOUS,
+            ),
+        )
+    }
+
+    private fun localNotificationChanged(
+        state: DevicesPairingState,
+        notificationState: LocalPairingNotificationState,
+        suggestNativeNotificationStyle: Boolean,
+    ): DevicesPairingReduction {
+        if (!state.isLocalMode) return DevicesPairingReduction(state)
+        return DevicesPairingReduction(
+            state.copy(
+                localNotificationState = notificationState,
+                applicationInputAvailable = true,
+                suggestNativeNotificationStyle = suggestNativeNotificationStyle,
+            ),
+        )
+    }
+
+    private fun notificationPermissionResult(
+        state: DevicesPairingState,
+        granted: Boolean,
+    ): DevicesPairingReduction {
+        if (!state.isLocalMode) return DevicesPairingReduction(state)
+        return DevicesPairingReduction(
+            state.copy(
+                notificationPermissionRequested = true,
+                localNotificationState = if (granted) {
+                    LocalPairingNotificationState.HIDDEN
+                } else {
+                    LocalPairingNotificationState.INPUT_UNAVAILABLE
+                },
+                applicationInputAvailable = true,
+            ),
+        )
+    }
+
+    private fun retryLocalMode(state: DevicesPairingState): DevicesPairingReduction {
+        if (!state.isLocalMode) return DevicesPairingReduction(state)
+        val requestNotificationPermission = !state.notificationPermissionRequested
+        return DevicesPairingReduction(
+            state = state.copy(
+                method = PairingMethod.SIX_DIGIT_CODE,
+                phase = PairingAttemptPhase.WAITING_FOR_CODE,
+                codeInput = "",
+                qrMatrix = null,
+                failure = null,
+                localDiscoveryStatus = LocalPairingDiscoveryStatus.SEARCHING,
+                localNotificationState = LocalPairingNotificationState.HIDDEN,
+                applicationInputAvailable = true,
+                notificationPermissionRequested = true,
+                suggestNativeNotificationStyle = false,
+                localWindowActive = true,
+                requiresLocalTargetSelection = false,
+            ),
+            effects = buildList {
+                add(DevicesPairingEffect.StartLocalWindow)
+                if (requestNotificationPermission) add(DevicesPairingEffect.RequestNotificationPermission)
+            },
+        )
+    }
+
+    private fun localPageLeft(
+        state: DevicesPairingState,
+        openingWirelessSettings: Boolean,
+    ): DevicesPairingReduction {
+        if (openingWirelessSettings && state.localWindowActive) {
+            return DevicesPairingReduction(state, listOf(DevicesPairingEffect.KeepLocalWindow))
+        }
+        return DevicesPairingReduction(
+            state = state.copy(
+                phase = PairingAttemptPhase.CANCELLED,
+                codeInput = "",
+                qrMatrix = null,
+                failure = DevicesPairingFailure.CANCELLED,
+                localWindowActive = false,
+                localNotificationState = LocalPairingNotificationState.HIDDEN,
+                requiresLocalTargetSelection = false,
+            ),
+            effects = listOf(DevicesPairingEffect.StopLocalWindow),
         )
     }
 
@@ -212,7 +354,10 @@ internal class DevicesPairingReducer {
     private fun DevicesPairingEvent.isAllowedAfterTerminal(): Boolean =
         this is DevicesPairingEvent.SelectMethod ||
             this == DevicesPairingEvent.UseCodeFallback ||
-            this is DevicesPairingEvent.SessionAvailabilityChanged
+            this is DevicesPairingEvent.SessionAvailabilityChanged ||
+            this == DevicesPairingEvent.EnterLocalMode ||
+            this == DevicesPairingEvent.RetryLocalMode ||
+            this is DevicesPairingEvent.LocalPageLeft
 
     private companion object {
         const val SIX_DIGIT_CODE_LENGTH = 6

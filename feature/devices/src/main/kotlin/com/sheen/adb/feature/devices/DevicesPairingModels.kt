@@ -3,6 +3,8 @@ package com.sheen.adb.feature.devices
 import com.sheen.adb.core.PairingAttemptPhase
 import com.sheen.adb.core.PairingMethod
 import com.sheen.adb.core.PairingSecret
+import com.sheen.adb.core.LocalPairingDiscoveryStatus
+import com.sheen.adb.core.LocalPairingNotificationState
 
 internal enum class DevicesPairingFailure {
     UNSUPPORTED,
@@ -21,12 +23,27 @@ internal data class DevicesPairingState(
     val codeFallbackAvailable: Boolean = false,
     val hasActiveSession: Boolean = false,
     val awaitingSessionReplacementConfirmation: Boolean = false,
+    val isLocalMode: Boolean = false,
+    val localDiscoveryStatus: LocalPairingDiscoveryStatus = LocalPairingDiscoveryStatus.IDLE,
+    val localNotificationState: LocalPairingNotificationState = LocalPairingNotificationState.HIDDEN,
+    val applicationInputAvailable: Boolean = false,
+    val notificationPermissionRequested: Boolean = false,
+    val suggestNativeNotificationStyle: Boolean = false,
+    val localWindowActive: Boolean = false,
+    val requiresLocalTargetSelection: Boolean = false,
 ) {
     override fun toString(): String =
         "DevicesPairingState(method=$method, phase=$phase, codeLength=${codeInput.length}, " +
             "hasQrMatrix=${qrMatrix != null}, failure=$failure, codeFallbackAvailable=$codeFallbackAvailable, " +
             "hasActiveSession=$hasActiveSession, " +
-            "awaitingSessionReplacementConfirmation=$awaitingSessionReplacementConfirmation)"
+            "awaitingSessionReplacementConfirmation=$awaitingSessionReplacementConfirmation, " +
+            "isLocalMode=$isLocalMode, localDiscoveryStatus=$localDiscoveryStatus, " +
+            "localNotificationState=$localNotificationState, " +
+            "applicationInputAvailable=$applicationInputAvailable, " +
+            "notificationPermissionRequested=$notificationPermissionRequested, " +
+            "suggestNativeNotificationStyle=$suggestNativeNotificationStyle, " +
+            "localWindowActive=$localWindowActive, " +
+            "requiresLocalTargetSelection=$requiresLocalTargetSelection)"
 }
 
 internal sealed interface DevicesPairingEvent {
@@ -57,9 +74,29 @@ internal sealed interface DevicesPairingEvent {
 
     data object ConfirmSessionReplacement : DevicesPairingEvent
     data object DismissSessionReplacement : DevicesPairingEvent
+    data object EnterLocalMode : DevicesPairingEvent
+
+    data class LocalDiscoveryChanged(
+        val status: LocalPairingDiscoveryStatus,
+    ) : DevicesPairingEvent
+
+    data class LocalNotificationChanged(
+        val state: LocalPairingNotificationState,
+        val suggestNativeNotificationStyle: Boolean = false,
+    ) : DevicesPairingEvent
+
+    data class NotificationPermissionResult(
+        val granted: Boolean,
+    ) : DevicesPairingEvent
+
+    data object RetryLocalMode : DevicesPairingEvent
+
+    data class LocalPageLeft(
+        val openingWirelessSettings: Boolean,
+    ) : DevicesPairingEvent
 }
 
-internal sealed interface DevicesPairingEffect {
+internal interface DevicesPairingEffect {
     data class Begin(val method: PairingMethod) : DevicesPairingEffect
 
     class SubmitCode(val secret: PairingSecret) : DevicesPairingEffect {
@@ -71,6 +108,10 @@ internal sealed interface DevicesPairingEffect {
     ) : DevicesPairingEffect
 
     data object CancelCurrent : DevicesPairingEffect
+    data object StartLocalWindow : DevicesPairingEffect
+    data object RequestNotificationPermission : DevicesPairingEffect
+    data object KeepLocalWindow : DevicesPairingEffect
+    data object StopLocalWindow : DevicesPairingEffect
 }
 
 internal data class DevicesPairingReduction(
