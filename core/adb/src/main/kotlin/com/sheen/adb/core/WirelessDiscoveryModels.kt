@@ -26,6 +26,24 @@ data class VerifiedWirelessDeviceId(val value: String) {
     override fun toString(): String = "VerifiedWirelessDeviceId(redacted)"
 }
 
+class WirelessDiscoveryTarget(
+    val generation: Long,
+    val observationId: WirelessObservationId,
+) {
+    init {
+        require(generation > 0L) { "Discovery target generation must be positive." }
+    }
+
+    override fun equals(other: Any?): Boolean =
+        other is WirelessDiscoveryTarget &&
+            generation == other.generation &&
+            observationId == other.observationId
+
+    override fun hashCode(): Int = 31 * generation.hashCode() + observationId.hashCode()
+
+    override fun toString(): String = "WirelessDiscoveryTarget(generation=$generation, observationId=redacted)"
+}
+
 sealed interface WirelessAddress {
     data class Ipv4(
         val firstOctet: Int,

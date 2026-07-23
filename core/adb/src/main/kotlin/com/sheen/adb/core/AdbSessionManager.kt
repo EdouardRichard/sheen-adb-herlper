@@ -187,6 +187,23 @@ interface AdbSessionManager : AutoCloseable {
         AdbOperationResult.Failure(AdbError.DiscoveryPlatformFailure),
     )
 
+    suspend fun pairDiscoveredService(
+        target: WirelessDiscoveryTarget,
+        attemptId: PairingAttemptId,
+        secret: PairingSecret,
+        timeout: Duration = 30.seconds,
+    ): AdbOperationResult<WirelessDiscoveryState> {
+        secret.clear()
+        return AdbOperationResult.Failure(AdbError.DiscoveryResolutionFailed)
+    }
+
+    suspend fun connectDiscoveredService(
+        target: WirelessDiscoveryTarget,
+        expectedPairingAttemptId: PairingAttemptId? = null,
+        timeout: Duration = 15.seconds,
+    ): AdbOperationResult<WirelessDiscoveryState> =
+        AdbOperationResult.Failure(AdbError.DiscoveryResolutionFailed)
+
     suspend fun loadRemoteDirectory(
         path: String? = null,
         expectedSessionId: String,
