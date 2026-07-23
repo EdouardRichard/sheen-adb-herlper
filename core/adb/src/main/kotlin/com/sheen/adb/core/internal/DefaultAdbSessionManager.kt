@@ -10,6 +10,11 @@ import com.sheen.adb.core.AdbOperationResult
 import com.sheen.adb.core.AdbOperationStage
 import com.sheen.adb.core.AdbSessionManager
 import com.sheen.adb.core.ApplicationField
+import com.sheen.adb.core.ApplicationIconEncoding
+import com.sheen.adb.core.ApplicationIconFallback
+import com.sheen.adb.core.ApplicationIconPayload
+import com.sheen.adb.core.ApplicationMetadataStatus
+import com.sheen.adb.core.ApplicationMetadataUpdate
 import com.sheen.adb.core.ApplicationMutationResult
 import com.sheen.adb.core.ApplicationSnapshot
 import com.sheen.adb.core.DiagnosticRedactor
@@ -59,6 +64,13 @@ import com.sheen.adb.core.WirelessServiceObservation
 import com.sheen.adb.core.WirelessServiceStatus
 import com.sheen.adb.core.WirelessServiceType
 import com.sheen.adb.core.VerifiedWirelessDeviceId
+import com.sheen.adb.core.internal.applications.ApplicationMetadataLoadStatus
+import com.sheen.adb.core.internal.applications.ApplicationMetadataLoader
+import com.sheen.adb.core.internal.applications.ApplicationMetadataParseResult
+import com.sheen.adb.core.internal.applications.ApplicationMetadataParser
+import com.sheen.adb.core.internal.applications.BoundedRemoteApkReader
+import com.sheen.adb.core.internal.applications.ParsedApplicationIconKind
+import com.sheen.adb.core.internal.applications.RemoteApkReader
 import com.sheen.adb.core.internal.discovery.WirelessDiscoveryReducer
 import com.sheen.adb.core.internal.pairing.MonotonicClock
 import com.sheen.adb.core.internal.pairing.LocalPairingCoordinator
@@ -114,6 +126,9 @@ internal class DefaultAdbSessionManager(
     private val lanDiscoveryWindow: Duration = 10.seconds,
     private val pairingIdentityFingerprint: (AdbEndpoint) -> ByteArray? = { null },
     private val connectedIdentityFingerprint: (AdbProtocolClient) -> ByteArray? = { null },
+    private val metadataReaderFactory: ((AdbProtocolClient, () -> Boolean) -> RemoteApkReader)? = null,
+    private val metadataParser: (ByteArray, List<String>) -> ApplicationMetadataParseResult =
+        ApplicationMetadataParser()::parse,
     private val qrPairingCoordinator: QrPairingCoordinator = QrPairingCoordinator(
         clock = MonotonicClock { System.nanoTime() / 1_000_000L },
         secureRandom = SecureRandom(),
@@ -257,6 +272,9 @@ internal class DefaultAdbSessionManager(
     private val lanPairingAssociations = linkedMapOf<PairingAttemptId, LanPairingAssociation>()
     private val wirelessIdentitySalt = ByteArray(32).also(SecureRandom()::nextBytes)
     private var applicationSnapshot: ApplicationSnapshot? = null
+    private val applicationMetadataMutex = Mutex()
+    private var applicationMetadataLoader: ApplicationMetadataLoader? = null
+    private var applicationMetadataLoaderSessionId: String? = null
     private val mutableState = MutableStateFlow<AdbConnectionState>(AdbConnectionState.Disconnected())
     override val connectionState: StateFlow<AdbConnectionState> = mutableState.asStateFlow()
     private val mutableDiagnosticEvents = MutableStateFlow<List<AdbDiagnosticEvent>>(emptyList())
@@ -1605,6 +1623,141 @@ internal class DefaultAdbSessionManager(
             }
         }
 
+    override fun observeApplicationMetadata(
+        expectedSessionId: String,
+        preferredLocaleTags: List<String>,
+    ): Flow<AdbOperationResult<ApplicationMetadataUpdate>> = flow {
+        applicationMetadataMutex.lock()
+        try {
+            val session = mutex.withLock { active }
+            val snapshot = applicationMutex.withLock {
+                applicationSnapshot?.takeIf { it.sessionId == expectedSessionId }
+            }
+            if (session == null || session.id != expectedSessionId || snapshot == null) {
+                emit(
+                    applicationFailure(
+                        AdbError.ApplicationSessionInvalid(AdbOperationStage.APPLICATIONS_LIST),
+                        session?.endpoint,
+                    ),
+                )
+                return@flow
+            }
+
+            val loader = applicationMetadataLoader
+                ?.takeIf { applicationMetadataLoaderSessionId == expectedSessionId }
+                ?: createApplicationMetadataLoader(session).also {
+                    clearApplicationMetadata()
+                    applicationMetadataLoader = it
+                    applicationMetadataLoaderSessionId = expectedSessionId
+                }
+            loader.retainSession(expectedSessionId)
+            try {
+                loader.load(
+                    sessionId = expectedSessionId,
+                    userId = snapshot.userId,
+                    packageNames = snapshot.applications.map { it.packageName },
+                    preferredLocaleTags = preferredLocaleTags,
+                ).collect { update ->
+                    val stillOwned = mutex.withLock { active?.id == expectedSessionId } &&
+                        applicationMutex.withLock {
+                            applicationSnapshot
+                                ?.takeIf { it.sessionId == update.sessionId && it.userId == update.userId }
+                                ?.applications
+                                ?.any { it.packageName == update.packageName } == true
+                        }
+                    if (!stillOwned) {
+                        clearApplicationMetadata()
+                        emit(
+                            AdbOperationResult.Success(
+                                ApplicationMetadataUpdate(
+                                    sessionId = update.sessionId,
+                                    userId = update.userId,
+                                    packageName = update.packageName,
+                                    displayName = null,
+                                    icon = null,
+                                    status = ApplicationMetadataStatus.SESSION_CHANGED,
+                                ),
+                            ),
+                        )
+                        throw ApplicationMetadataOwnershipLost()
+                    }
+                    emit(AdbOperationResult.Success(update.toPublic()))
+                }
+            } catch (_: ApplicationMetadataOwnershipLost) {
+                Unit
+            }
+        } finally {
+            applicationMetadataMutex.unlock()
+        }
+    }
+
+    private fun createApplicationMetadataLoader(session: ActiveSession): ApplicationMetadataLoader {
+        val isCurrent = { active?.id == session.id }
+        val reader = metadataReaderFactory?.invoke(session.client, isCurrent) ?: BoundedRemoteApkReader(
+            client = session.client,
+            sessionIsCurrent = isCurrent,
+            ioDispatcher = ioDispatcher,
+            onForcedSessionClose = {
+                runCatching { session.client.close() }
+                if (active?.id == session.id) {
+                    active = null
+                    applicationSnapshot = null
+                    clearApplicationMetadata()
+                    mutableState.value = AdbConnectionState.Disconnected()
+                }
+            },
+        )
+        return ApplicationMetadataLoader(reader = reader, parseMetadata = metadataParser)
+    }
+
+    private fun com.sheen.adb.core.internal.applications.ApplicationMetadataLoadUpdate.toPublic(): ApplicationMetadataUpdate {
+        val parsedIcon = metadata?.icon
+        val publicIcon = parsedIcon?.mimeType?.toIconEncoding()?.let { encoding ->
+            ApplicationIconPayload(
+                encoding = encoding,
+                width = parsedIcon.width,
+                height = parsedIcon.height,
+                encodedBytes = parsedIcon.encodedBytes,
+                fallback = when (parsedIcon.kind) {
+                    ParsedApplicationIconKind.RASTER -> ApplicationIconFallback.NONE
+                    ParsedApplicationIconKind.ADAPTIVE_FOREGROUND_FALLBACK ->
+                        ApplicationIconFallback.ADAPTIVE_FOREGROUND
+                },
+            )
+        }
+        return ApplicationMetadataUpdate(
+            sessionId = sessionId,
+            userId = userId,
+            packageName = packageName,
+            displayName = metadata?.displayName,
+            icon = publicIcon,
+            status = when (status) {
+                ApplicationMetadataLoadStatus.AVAILABLE -> ApplicationMetadataStatus.AVAILABLE
+                ApplicationMetadataLoadStatus.UNAVAILABLE -> ApplicationMetadataStatus.UNAVAILABLE
+                ApplicationMetadataLoadStatus.TOO_LARGE -> ApplicationMetadataStatus.TOO_LARGE
+                ApplicationMetadataLoadStatus.PARSE_FAILED -> ApplicationMetadataStatus.PARSE_FAILED
+                ApplicationMetadataLoadStatus.SESSION_CHANGED -> ApplicationMetadataStatus.SESSION_CHANGED
+                ApplicationMetadataLoadStatus.TIMED_OUT -> ApplicationMetadataStatus.TIMED_OUT
+            },
+            evictedIconPackages = evictedIconPackages,
+        )
+    }
+
+    private fun String.toIconEncoding(): ApplicationIconEncoding? = when (this) {
+        "image/png" -> ApplicationIconEncoding.PNG
+        "image/jpeg" -> ApplicationIconEncoding.JPEG
+        "image/webp" -> ApplicationIconEncoding.WEBP
+        else -> null
+    }
+
+    private fun clearApplicationMetadata() {
+        applicationMetadataLoader?.clear()
+        applicationMetadataLoader = null
+        applicationMetadataLoaderSessionId = null
+    }
+
+    private class ApplicationMetadataOwnershipLost : RuntimeException()
+
     override suspend fun forceStopApplication(
         packageName: String,
         expectedSessionId: String,
@@ -2169,16 +2322,19 @@ internal class DefaultAdbSessionManager(
         } catch (error: TimeoutCancellationException) {
             active = null
             applicationSnapshot = null
+            clearApplicationMetadata()
             failure(AdbError.Timeout(AdbOperationStage.DISCONNECT), null, error)
         } catch (error: CancellationException) {
             active = null
             applicationSnapshot = null
+            clearApplicationMetadata()
             mutableState.value = AdbConnectionState.Disconnected(DisconnectionReason.DISCONNECT_CANCELLED)
             appendDiagnostic(AdbOperationStage.DISCONNECT, AdbDiagnosticOutcome.CANCELLED, "ADB_DISCONNECT_CANCELLED", null)
             AdbOperationResult.Cancelled
         } catch (error: Throwable) {
             active = null
             applicationSnapshot = null
+            clearApplicationMetadata()
             failure(AdbExceptionMapper.map(error, AdbOperationStage.DISCONNECT), null, error)
         } finally {
             if (sessionToClose != null) {
@@ -2228,6 +2384,7 @@ internal class DefaultAdbSessionManager(
             val session = active
             active = null
             applicationSnapshot = null
+            clearApplicationMetadata()
             invalidateExclusiveOperation(session?.id)
             runCatching { session?.client?.close() }
             if (session != null) {
@@ -2246,6 +2403,7 @@ internal class DefaultAdbSessionManager(
         val session = active ?: return
         active = null
         applicationSnapshot = null
+        clearApplicationMetadata()
         invalidateExclusiveOperation(session.id)
         try {
             session.client.close()
@@ -2263,6 +2421,7 @@ internal class DefaultAdbSessionManager(
         if (active?.id == session.id) {
             active = null
             applicationSnapshot = null
+            clearApplicationMetadata()
             terminateActiveWirelessDiscovery(AdbError.DiscoverySessionChanged)
         }
         invalidateExclusiveOperation(session.id)
@@ -2279,6 +2438,7 @@ internal class DefaultAdbSessionManager(
         if (active?.id != session.id) return@withLock
         active = null
         applicationSnapshot = null
+        clearApplicationMetadata()
         terminateActiveWirelessDiscovery(AdbError.DiscoverySessionChanged)
         invalidateExclusiveOperation(session.id)
         mutableState.value = AdbConnectionState.Disconnected()

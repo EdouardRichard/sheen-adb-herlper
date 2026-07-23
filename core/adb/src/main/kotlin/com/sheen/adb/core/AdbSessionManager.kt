@@ -9,6 +9,43 @@ import java.io.OutputStream
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
+enum class ApplicationMetadataStatus {
+    PENDING,
+    AVAILABLE,
+    UNAVAILABLE,
+    TOO_LARGE,
+    PARSE_FAILED,
+    SESSION_CHANGED,
+    TIMED_OUT,
+}
+
+enum class ApplicationIconEncoding { PNG, JPEG, WEBP }
+
+enum class ApplicationIconFallback { NONE, ADAPTIVE_FOREGROUND }
+
+class ApplicationIconPayload(
+    val encoding: ApplicationIconEncoding,
+    val width: Int,
+    val height: Int,
+    encodedBytes: ByteArray,
+    val fallback: ApplicationIconFallback,
+) {
+    private val retainedBytes = encodedBytes.copyOf()
+
+    val encodedBytes: ByteArray
+        get() = retainedBytes.copyOf()
+}
+
+data class ApplicationMetadataUpdate(
+    val sessionId: String,
+    val userId: Int,
+    val packageName: String,
+    val displayName: String?,
+    val icon: ApplicationIconPayload?,
+    val status: ApplicationMetadataStatus,
+    val evictedIconPackages: Set<String> = emptySet(),
+)
+
 internal data class WirelessDiscoverySourceRequest(
     val generation: Long,
     val mode: WirelessDiscoveryMode,
@@ -179,6 +216,15 @@ interface AdbSessionManager : AutoCloseable {
     suspend fun listProcesses(timeout: Duration = 15.seconds): AdbOperationResult<ProcessSnapshot>
 
     suspend fun listApplications(timeout: Duration = 15.seconds): AdbOperationResult<ApplicationSnapshot>
+
+    fun observeApplicationMetadata(
+        expectedSessionId: String,
+        preferredLocaleTags: List<String> = emptyList(),
+    ): Flow<AdbOperationResult<ApplicationMetadataUpdate>> = flowOf(
+        AdbOperationResult.Failure(
+            AdbError.ApplicationSessionInvalid(AdbOperationStage.APPLICATIONS_LIST),
+        ),
+    )
 
     fun observeWirelessServices(
         mode: WirelessDiscoveryMode,
