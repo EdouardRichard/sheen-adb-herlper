@@ -203,7 +203,7 @@
 
 ### Tests first
 
-- [ ] T048 [P] [US4] 先写受限 APK parser 失败测试，使用内存合成 APK 覆盖 locale label、普通/自适应图标、缺资源、损坏 ZIP、zip traversal、压缩炸弹、split-only 和 32 MiB 上限于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationMetadataParserTest.kt`
+- [X] T048 [P] [US4] 先写受限 APK parser 失败测试，使用内存合成 APK 覆盖 locale label、普通/自适应图标、缺资源、损坏 ZIP、zip traversal、压缩炸弹、split-only 和 32 MiB 上限于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationMetadataParserTest.kt`
   - **验收**: 目标测试因 parser 接口/实现缺失而失败；fixture 在测试内生成，不含真实 APK、包名或签名材料，不写磁盘；至少一个 locale label 与普通/自适应图标成功用例必须通过实现满足，整项 `UNSUPPORTED` 不能让测试转绿。
 - [ ] T049 [US4] 实现隔离第三方类型的受限 APK 元数据 parser 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/applications/ApplicationMetadataParser.kt`
   - **验收**: T048 通过并完成 API 30 Android runtime smoke test；public model 不暴露 apk-parser 类型，损坏/单包不支持结构化降级；T001 门禁失败时不得实施或把该故事标为完成，必须返回 Plan 选择替代 parser。
