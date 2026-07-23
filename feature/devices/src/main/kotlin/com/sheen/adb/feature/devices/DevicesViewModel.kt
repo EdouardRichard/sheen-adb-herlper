@@ -18,6 +18,7 @@ import com.sheen.adb.core.PairingAttemptPhase
 import com.sheen.adb.core.PairingMethod
 import com.sheen.adb.core.QrPairingMaterial
 import com.sheen.adb.core.WirelessDiscoveryMode
+import com.sheen.adb.core.WirelessDiscoveryTarget
 import com.sheen.adb.core.WirelessServiceStatus
 import com.sheen.adb.core.WirelessServiceType
 import com.sheen.adb.data.DeviceProfile
@@ -52,6 +53,7 @@ data class DevicesUiState(
     val pendingRenameProfile: DeviceProfile? = null,
     val renameInput: String = "",
     val notificationPermissionRequestGeneration: Long = 0L,
+    val awaitingDiscoverySessionReplacement: Boolean = false,
 )
 
 class DevicesViewModel(
@@ -67,6 +69,7 @@ class DevicesViewModel(
     private var localPairingWindowIdFactory: () -> LocalPairingWindowId = {
         LocalPairingWindowId.of(UUID.randomUUID().toString())
     }
+    private val discoveryReducer = DevicesDiscoveryReducer()
 
     internal constructor(
         manager: AdbSessionManager,
@@ -89,12 +92,20 @@ class DevicesViewModel(
     val state: StateFlow<DevicesUiState> = mutableState.asStateFlow()
     private val mutablePairingState = MutableStateFlow(DevicesPairingState())
     internal val pairingState: StateFlow<DevicesPairingState> = mutablePairingState.asStateFlow()
+    private val mutableDiscoveryState = MutableStateFlow(DevicesDiscoveryState())
+    internal val discoveryState: StateFlow<DevicesDiscoveryState> = mutableDiscoveryState.asStateFlow()
     private var operation: Job? = null
     private var operationGeneration = 0L
     private var activeQrAttemptId: PairingAttemptId? = null
     private var activeLocalWindowId: LocalPairingWindowId? = null
     private var localPairingGeneration = 0L
     private var localSubmission: Job? = null
+    private var discoveryJob: Job? = null
+    private var discoveryCollectionGeneration = 0L
+    private var discoveredPairingTarget: WirelessDiscoveryTarget? = null
+    private var discoveredPairingAttemptId: PairingAttemptId? = null
+    private var lastSuccessfulDiscoveredPairingAttemptId: PairingAttemptId? = null
+    private var pendingDiscoveryConnectTarget: WirelessDiscoveryTarget? = null
 
     init {
         viewModelScope.launch {
@@ -126,6 +137,58 @@ class DevicesViewModel(
 
     fun prefillLocalhost() = mutableState.update {
         it.copy(endpointInput = "127.0.0.1:", inputError = null, notice = "请填写无线调试主页面显示的当前调试端口")
+    }
+
+    fun onDiscoveryForeground() {
+        if (discoveryJob?.isActive == true) return
+        startLanDiscovery()
+    }
+
+    fun refreshDiscovery() = startLanDiscovery()
+
+    fun onDiscoveryBackground() = stopLanDiscovery(markCancelled = true)
+
+    fun cancelDiscovery() = stopLanDiscovery(markCancelled = true)
+
+    fun useManualDiscoveryAddress() {
+        reduceDiscovery(DevicesDiscoveryEvent.UseManualAddress)
+    }
+
+    internal fun selectDiscoveryPairing(target: WirelessDiscoveryTarget) {
+        reduceDiscovery(DevicesDiscoveryEvent.SelectPairing(target))
+    }
+
+    internal fun selectDiscoveryConnect(target: WirelessDiscoveryTarget) {
+        reduceDiscovery(DevicesDiscoveryEvent.SelectConnect(target))
+    }
+
+    internal fun confirmDiscoverySelection() {
+        reduceDiscovery(DevicesDiscoveryEvent.ConfirmSelection)
+    }
+
+    internal fun dismissDiscoverySelection() {
+        reduceDiscovery(DevicesDiscoveryEvent.DismissSelection)
+    }
+
+    fun confirmDiscoverySessionReplacement() {
+        val target = pendingDiscoveryConnectTarget ?: return
+        mutableState.update { it.copy(awaitingDiscoverySessionReplacement = false) }
+        startOperation { generation ->
+            when (val disconnected = manager.disconnect()) {
+                is AdbOperationResult.Success -> if (generation == operationGeneration) {
+                    connectDiscoveredTarget(target, generation)
+                }
+                is AdbOperationResult.Failure -> mutableState.update {
+                    it.copy(notice = disconnected.error.userMessage)
+                }
+                AdbOperationResult.Cancelled -> Unit
+            }
+        }
+    }
+
+    fun dismissDiscoverySessionReplacement() {
+        pendingDiscoveryConnectTarget = null
+        mutableState.update { it.copy(awaitingDiscoverySessionReplacement = false) }
     }
 
     fun connect() {
@@ -173,6 +236,8 @@ class DevicesViewModel(
 
     fun closePairing() {
         onPairingPageLeft()
+        discoveredPairingTarget = null
+        discoveredPairingAttemptId = null
         mutableState.update {
             it.copy(showPairing = false, pairingCode = "", inputError = null)
         }
@@ -211,6 +276,10 @@ class DevicesViewModel(
     fun pair() {
         if (mutablePairingState.value.isLocalMode) {
             submitLocalPairingCode()
+            return
+        }
+        if (discoveredPairingTarget != null) {
+            submitDiscoveredPairingCode()
             return
         }
         val current = mutableState.value
@@ -424,6 +493,180 @@ class DevicesViewModel(
             DevicesPairingEffect.KeepLocalWindow -> Unit
             DevicesPairingEffect.StopLocalWindow -> stopLocalPairingWindow()
         }
+    }
+
+    private fun startLanDiscovery() {
+        val previous = discoveryJob
+        val collectionGeneration = ++discoveryCollectionGeneration
+        mutableDiscoveryState.value = DevicesDiscoveryState(phase = DevicesDiscoveryPhase.SCANNING)
+        discoveryJob = viewModelScope.launch {
+            try {
+                previous?.cancelAndJoin()
+                if (collectionGeneration != discoveryCollectionGeneration) return@launch
+                var coreGeneration: Long? = null
+                manager.observeWirelessServices(
+                    mode = WirelessDiscoveryMode.LAN_FOREGROUND,
+                    timeout = LAN_DISCOVERY_TIMEOUT,
+                ).collect { result ->
+                    if (collectionGeneration != discoveryCollectionGeneration) return@collect
+                    when (result) {
+                        is AdbOperationResult.Success -> {
+                            if (coreGeneration == null) {
+                                coreGeneration = result.value.generation
+                                reduceDiscovery(
+                                    DevicesDiscoveryEvent.Start(result.value.generation),
+                                    handleEffects = false,
+                                )
+                            }
+                            reduceDiscovery(
+                                DevicesDiscoveryEvent.Snapshot(result.value),
+                                handleEffects = false,
+                            )
+                        }
+                        is AdbOperationResult.Failure -> reduceDiscovery(
+                            DevicesDiscoveryEvent.Failed(discoveryFailure(result.error)),
+                            handleEffects = false,
+                        )
+                        AdbOperationResult.Cancelled -> reduceDiscovery(
+                            DevicesDiscoveryEvent.Cancelled,
+                            handleEffects = false,
+                        )
+                    }
+                }
+            } catch (_: CancellationException) {
+                // Explicit lifecycle cancellation owns the visible cancelled state.
+            } finally {
+                if (collectionGeneration == discoveryCollectionGeneration) discoveryJob = null
+            }
+        }
+    }
+
+    private fun stopLanDiscovery(markCancelled: Boolean) {
+        discoveryCollectionGeneration++
+        discoveryJob?.cancel()
+        discoveryJob = null
+        if (markCancelled) {
+            reduceDiscovery(DevicesDiscoveryEvent.Cancelled, handleEffects = false)
+        }
+    }
+
+    private fun reduceDiscovery(
+        event: DevicesDiscoveryEvent,
+        handleEffects: Boolean = true,
+    ): DevicesDiscoveryReduction {
+        val reduction = discoveryReducer.reduce(mutableDiscoveryState.value, event)
+        mutableDiscoveryState.value = reduction.state
+        if (handleEffects) reduction.effects.forEach(::handleDiscoveryEffect)
+        return reduction
+    }
+
+    private fun handleDiscoveryEffect(effect: DevicesDiscoveryEffect) {
+        when (effect) {
+            DevicesDiscoveryEffect.OpenManualAddress -> prefillLocalhost()
+            is DevicesDiscoveryEffect.OpenCodePairing -> {
+                val attemptId = pairingAttemptIdFactory()
+                discoveredPairingTarget = effect.target
+                discoveredPairingAttemptId = attemptId
+                mutableState.update {
+                    it.copy(showPairing = true, pairingCode = "", inputError = null, notice = null)
+                }
+                reducePairing(
+                    DevicesPairingEvent.SelectMethod(PairingMethod.SIX_DIGIT_CODE),
+                    handleEffects = false,
+                )
+                reducePairing(DevicesPairingEvent.StartRequested, handleEffects = false)
+            }
+            is DevicesDiscoveryEffect.Connect -> {
+                pendingDiscoveryConnectTarget = effect.target
+                if (mutableState.value.connectionState is AdbConnectionState.Connected) {
+                    mutableState.update { it.copy(awaitingDiscoverySessionReplacement = true) }
+                } else {
+                    startOperation { generation -> connectDiscoveredTarget(effect.target, generation) }
+                }
+            }
+        }
+    }
+
+    private fun submitDiscoveredPairingCode() {
+        val target = discoveredPairingTarget
+        val attemptId = discoveredPairingAttemptId
+        if (target == null || attemptId == null) {
+            clearPairingCode()
+            return
+        }
+        val reduction = reducePairing(DevicesPairingEvent.SubmitCode, handleEffects = false)
+        clearPairingCode()
+        val submit = reduction.effects.singleOrNull() as? DevicesPairingEffect.SubmitCode
+        if (submit == null) {
+            mutableState.update { it.copy(inputError = "配对码必须是 6 位数字") }
+            return
+        }
+        startOperation { generation ->
+            try {
+                when (val result = manager.pairDiscoveredService(target, attemptId, submit.secret)) {
+                    is AdbOperationResult.Success -> if (generation == operationGeneration) {
+                        lastSuccessfulDiscoveredPairingAttemptId = attemptId
+                        discoveredPairingTarget = null
+                        discoveredPairingAttemptId = null
+                        reducePairing(DevicesPairingEvent.Succeeded, handleEffects = false)
+                        mutableState.update {
+                            it.copy(
+                                showPairing = false,
+                                pairingCode = "",
+                                notice = "配对成功，请刷新并选择连接服务。",
+                            )
+                        }
+                    }
+                    is AdbOperationResult.Failure -> if (generation == operationGeneration) {
+                        reducePairing(terminalPairingEvent(result.error), handleEffects = false)
+                    }
+                    AdbOperationResult.Cancelled -> if (generation == operationGeneration) {
+                        reducePairing(DevicesPairingEvent.Cancelled, handleEffects = false)
+                    }
+                }
+            } finally {
+                submit.secret.clear()
+                clearPairingCode()
+            }
+        }
+    }
+
+    private suspend fun connectDiscoveredTarget(
+        target: WirelessDiscoveryTarget,
+        generation: Long,
+    ) {
+        when (
+            val result = manager.connectDiscoveredService(
+                target = target,
+                expectedPairingAttemptId = lastSuccessfulDiscoveredPairingAttemptId,
+            )
+        ) {
+            is AdbOperationResult.Success -> if (generation == operationGeneration) {
+                pendingDiscoveryConnectTarget = null
+                reduceDiscovery(DevicesDiscoveryEvent.Snapshot(result.value), handleEffects = false)
+                mutableState.update {
+                    it.copy(awaitingDiscoverySessionReplacement = false, notice = "连接成功")
+                }
+            }
+            is AdbOperationResult.Failure -> if (generation == operationGeneration) {
+                mutableState.update {
+                    it.copy(
+                        awaitingDiscoverySessionReplacement = false,
+                        inputError = result.error.userMessage,
+                    )
+                }
+            }
+            AdbOperationResult.Cancelled -> Unit
+        }
+    }
+
+    private fun discoveryFailure(error: AdbError): DevicesDiscoveryFailure = when (error) {
+        AdbError.DiscoveryNetworkUnavailable -> DevicesDiscoveryFailure.NETWORK_UNAVAILABLE
+        AdbError.DiscoveryPermissionUnavailable -> DevicesDiscoveryFailure.PERMISSION_UNAVAILABLE
+        AdbError.DiscoveryResolutionFailed -> DevicesDiscoveryFailure.RESOLUTION_FAILED
+        AdbError.DiscoveryTimeout, is AdbError.Timeout -> DevicesDiscoveryFailure.TIMED_OUT
+        AdbError.DiscoverySessionChanged -> DevicesDiscoveryFailure.SESSION_CHANGED
+        else -> DevicesDiscoveryFailure.PLATFORM_FAILURE
     }
 
     private fun startLocalPairingWindow() {
@@ -661,6 +904,7 @@ class DevicesViewModel(
     private fun clearPairingCode() = mutableState.update { it.copy(pairingCode = "") }
 
     override fun onCleared() {
+        stopLanDiscovery(markCancelled = false)
         stopLocalPairingWindow()
         cancelPairingOperation(markCancelled = hasNonTerminalPairing())
         super.onCleared()
@@ -670,6 +914,7 @@ class DevicesViewModel(
         const val HOST_IDENTITY_REFERENCE = "android-keystore-host-v1"
         private const val SIX_DIGIT_CODE_LENGTH = 6
         private val QR_PAIRING_TIMEOUT = 120.seconds
+        private val LAN_DISCOVERY_TIMEOUT = 10.seconds
         private val TERMINAL_PAIRING_PHASES = setOf(
             PairingAttemptPhase.SUCCEEDED,
             PairingAttemptPhase.CANCELLED,
