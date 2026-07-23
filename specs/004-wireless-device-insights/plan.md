@@ -149,6 +149,7 @@ feature/logcat/
 ## Verification Strategy
 
 1. JVM 单元测试覆盖 QR 编码、六位码校验、状态机终态清理、NSD 回调去重/过期丢弃、IPv4/IPv6 解析、服务关联拒绝猜测、APK 容量/解析降级、名称/包名搜索、Logcat parser 与组合筛选、PID 复用和多候选关联。
+   `DevicesViewModel` 的 pairing/discovery coroutine 测试使用与现有 Coroutines 1.10.2 同版本的 `kotlinx-coroutines-test`（test scope only）替换 JVM `Dispatchers.Main`；该 artifact 不进入运行时、Manifest 或发布依赖，版本仍由 `libs.versions.toml` 集中管理。
 2. app/feature 策略测试覆盖通知权限拒绝、锁屏 action-free、解锁后 RemoteInput、2 分钟截止、页面前后台、Session 切换和应用内回退。
 3. 运行 `gradlew testDebugUnitTest lintDebug assembleDebug`（本仓库设置 `JAVA_HOME=C:\Users\Richard\.gradle\sheen-jdk21`），检查 `merged_manifest` 只含登记权限及一个非导出 `shortService`。
 4. 成功率指标采用固定证据协议：SC001 做 40 次配对（QR/配对码各 20 次，至少覆盖 Android 11、13、16）；SC002 做 20 次本机启动；SC003 做 20 次发现到通知；SC005 在受控网络每轮公布 15 个服务并执行 20 轮。计时统一从用户点击开始到首个明确结果、通知或服务集合稳定，记录成功次数、P95 与失败分类，真实端点和 service name 脱敏。

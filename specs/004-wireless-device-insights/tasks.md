@@ -106,6 +106,8 @@
   - **验收**: T024A 从缺少 API 的编译失败推进为行为失败；默认兼容实现返回 `PairingUnsupported` 且不保留 material，既有 fake manager 无需实现新方法即可编译。
 - [X] T024D [US1] 在唯一 manager 中持有 QR coordinator 并将已验证 observation 接入共用配对 path 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
   - **验收**: T024A、T017、T019 和全部 core manager 回归通过；只有当前 attempt 的精确 resolved pairing observation 可触发 Kadb，所有终态/close 清理 material，成功只授权且保持无连接状态，已有 Session 保持不变。
+- [ ] T024E [US1] 为 JVM ViewModel coroutine 测试登记同版本 test-only dispatcher 依赖于 `gradle/libs.versions.toml` 和 `feature/devices/build.gradle.kts`
+  - **验收**: `kotlinx-coroutines-test` 与现有 Coroutines 版本一致且仅位于 test scope；dependency/compile 检查通过，运行时依赖、Manifest、权限和持久化均无变化。
 - [ ] T025 [US1] 先写 DevicesViewModel 配对流失败测试，覆盖 manager flow 收集、generation 丢弃、页面离开清理、重试和用户确认断开旧 Session 于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/DevicesPairingViewModelTest.kt`
   - **验收**: 目标测试因 ViewModel 未接入新 reducer/manager 而失败；fake manager/repository 不使用真实端点或包名。
 - [ ] T026 [US1] 将 QR 与配对码事件接入 ViewModel 于 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesViewModel.kt`
@@ -311,7 +313,7 @@ flowchart TD
 ### Within-task TDD dependencies
 
 - T005 → T006；T007 → T008；T009 → T010；T011 → T012；T013 → T014 → T014A → T015 → T016。
-- US1：T017 → T018 → T019 → T020A → T020；T021 → T022；T023 → T024 → T024A → T024B → T024C → T024D → T025 → T026；T027 → T028。
+- US1：T017 → T018 → T019 → T020A → T020；T021 → T022；T023 → T024 → T024A → T024B → T024C → T024D → T024E → T025 → T026；T027 → T028。
 - US2：T029 → T030；T031 → T032；T033 → T034；T035 → T036；T037 → T038 → T039。
 - US3：T040 → T041；T042 → T043 → T044 → T045；T046 → T047。
 - US4：T048 → T049；T050 → T051 → T052 → T053；T054 → T055；T056 → T057。
