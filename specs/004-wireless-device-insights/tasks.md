@@ -147,7 +147,7 @@
   - **验收**: 目标测试因 bridge/装配缺失而失败；测试证明 App 层只翻译平台事件，不复制 deadline/token/配对业务状态。
 - [X] T036 [US2] 装配本机配对平台 bridge 与应用级生命周期于 `app/src/main/kotlin/com/sheen/adbhelper/localpairing/LocalPairingAppBridge.kt` 和 `app/src/main/kotlin/com/sheen/adbhelper/SheenApplication.kt`
   - **验收**: T035 通过；只持有 application Context，同一窗口只映射一个 core coordinator，进程结束不恢复旧窗口，通知权限拒绝不阻塞应用内流。
-- [ ] T037 [US2] 先扩充本机模式 Feature 失败测试，覆盖默认 code、local discovery 歧义、通知 waiting/input-unavailable、解锁后输入就绪、应用内重试、首次授权、OEM 建议和离页时仅活动 short-service 窗口例外于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/DevicesPairingReducerTest.kt`
+- [X] T037 [US2] 先扩充本机模式 Feature 失败测试，覆盖默认 code、local discovery 歧义、通知 waiting/input-unavailable、解锁后输入就绪、应用内重试、首次授权、OEM 建议和离页时仅活动 short-service 窗口例外于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/DevicesPairingReducerTest.kt`
   - **验收**: 新用例在 US1 reducer 上失败；多个候选时要求用户选择，权限提示仅由用户主动进入本机模式触发，所有 effect 只调用项目自有 core/App bridge。
 - [ ] T038 [US2] 扩展本机模式状态、事件与 reducer 于 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesPairingModels.kt` 和 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesPairingReducer.kt`
   - **验收**: T037 与既有 reducer 测试通过；本机入口默认六位码，found/not-found/ambiguous/unsupported、通知 waiting/input-unavailable、首次授权、OEM 建议和离页 short-service effect 均为项目自有状态。
