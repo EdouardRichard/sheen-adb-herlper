@@ -37,6 +37,8 @@ internal class LocalPairingAppBridge(
     private val controller: LocalPairingController,
     private val serviceLifecycle: LocalPairingServiceLifecycle,
 ) {
+    private var serviceStarted = false
+
     val state: StateFlow<LocalPairingControllerState>
         get() = controller.state
 
@@ -44,7 +46,7 @@ internal class LocalPairingAppBridge(
         attemptId: PairingAttemptId,
         windowId: LocalPairingWindowId,
     ): AdbOperationResult<LocalPairingWindow> = controller.start(attemptId, windowId).also { result ->
-        if (result is AdbOperationResult.Success) serviceLifecycle.start()
+        if (result is AdbOperationResult.Success) ensureServiceStarted()
     }
 
     fun onNotificationPermissionResult(
@@ -66,7 +68,28 @@ internal class LocalPairingAppBridge(
         )
 
     fun stop(windowId: LocalPairingWindowId): AdbOperationResult<Unit> =
-        controller.cancel(windowId).also { serviceLifecycle.stop() }
+        controller.cancel(windowId).also { ensureServiceStopped() }
 
-    fun hasActiveWindow(): Boolean = state.value.window != null
+    @Synchronized
+    fun synchronizeService() {
+        if (hasActiveWindow()) ensureServiceStarted() else ensureServiceStopped()
+    }
+
+    fun hasActiveWindow(): Boolean {
+        val controllerState = state.value
+        return controllerState.window?.stopReason == null && controllerState.stopReason == null &&
+            controllerState.window != null
+    }
+
+    private fun ensureServiceStarted() {
+        if (serviceStarted) return
+        serviceLifecycle.start()
+        serviceStarted = true
+    }
+
+    private fun ensureServiceStopped() {
+        if (!serviceStarted) return
+        serviceLifecycle.stop()
+        serviceStarted = false
+    }
 }
