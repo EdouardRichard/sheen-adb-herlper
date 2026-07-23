@@ -281,7 +281,7 @@
   - **验收**: 文档准确记录容量、Session、降级、筛选与关联边界，不声明高级诊断或持久化图标/日志。
 - [X] T072 同步最终 Manifest 状态和隐私说明于 `docs/权限矩阵.md` 和 `docs/privacy-policy.md`
   - **验收**: “待实现声明”只在 merged Manifest 证据通过后改为“已声明”；隐私说明覆盖本地 NSD、通知输入、应用元数据与诊断且不暗示上传。
-- [ ] T073 复核实际解析图、许可证/NOTICE、维护风险、体积和移除路径于 `docs/第三方依赖审查.md` 和 `docs/第三方依赖与许可证.md`
+- [X] T073 复核实际解析图、许可证/NOTICE、维护风险、体积和移除路径于 `docs/第三方依赖审查.md` 和 `docs/第三方依赖与许可证.md`
   - **验收**: 文档与 Gradle 实际解析结果一致；ZXing/apk-parser 与传递依赖无遗漏，`spake2-java` 阻断仍存在时明确保留发布 BLOCKED。
 - [ ] T074 按 `specs/004-wireless-device-insights/quickstart.md` 运行全量单元测试、lint、Debug assemble、merged Manifest 与断链/敏感值扫描，并记录实际输出于 `docs/archive/releases/v0.04/verification.md`
   - **验收**: 设置 `JAVA_HOME=C:\Users\Richard\.gradle\sheen-jdk21` 后命令结果、失败项和未运行项均逐项记录；不得把自动化通过写成真机通过。
