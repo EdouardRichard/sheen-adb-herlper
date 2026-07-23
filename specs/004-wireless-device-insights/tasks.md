@@ -297,7 +297,7 @@
   - **验收**: 明确区分 DNS-SD/mDNS 查询、已公布服务解析、用户选择后连接与禁止流量；只有证明未出现子网枚举或未公布主机/端口探测时 SC016 才通过，缺少捕获环境则标 `BLOCKED`。
 - [X] T079 按 200 应用与诊断受控数据集执行应用/进程/Logcat 真机矩阵，并更新 `docs/archive/releases/v0.04/verification.md`
   - **验收**: 记录中英文/同名/缺失图标、名称与包名查询 1 秒内更新、PID 复用/共享 UID/多进程、10k/4MiB/100 条边界和 Session 切换；SC007–SC009、SC014、SC017 逐项追溯且无真实包名或 Logcat 入库。
-- [ ] T080 分别评估功能完成、自动化、真机、可用性、网络观察和发布合规，并记录门禁于 `docs/archive/releases/v0.04/release-gates.md`
+- [X] T080 分别评估功能完成、自动化、真机、可用性、网络观察和发布合规，并记录门禁于 `docs/archive/releases/v0.04/release-gates.md`
   - **验收**: 六类结论互不替代；任何缺失证据保持 `NOT_RUN`/`BLOCKED`，只要 ADR 0004 的 `spake2-java` 条件未关闭，发布状态必须为 BLOCKED，且不创建虚假的发布完成结论。
 
 ---
