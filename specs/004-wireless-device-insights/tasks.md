@@ -277,7 +277,7 @@
 
 - [X] T070 [P] 更新无线配对、发现和单 Session 当前架构事实于 `docs/architecture/adb-session.md` 和 `docs/architecture/device-and-data.md`
   - **验收**: 文档只描述已由代码/测试证明的行为，链接到项目自有接口与 ADR 0007；未完成真机项明确标为待验，不把 Plan 当实现事实。
-- [ ] T071 [P] 更新应用元数据与基础诊断当前架构事实于 `docs/architecture/application-management.md` 和 `docs/architecture/diagnostics.md`
+- [X] T071 [P] 更新应用元数据与基础诊断当前架构事实于 `docs/architecture/application-management.md` 和 `docs/architecture/diagnostics.md`
   - **验收**: 文档准确记录容量、Session、降级、筛选与关联边界，不声明高级诊断或持久化图标/日志。
 - [ ] T072 同步最终 Manifest 状态和隐私说明于 `docs/权限矩阵.md` 和 `docs/privacy-policy.md`
   - **验收**: “待实现声明”只在 merged Manifest 证据通过后改为“已声明”；隐私说明覆盖本地 NSD、通知输入、应用元数据与诊断且不暗示上传。
