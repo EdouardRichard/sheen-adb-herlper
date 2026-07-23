@@ -209,7 +209,7 @@
   - **验收**: T048 通过并完成 API 30 Android runtime smoke test；public model 不暴露 apk-parser 类型，损坏/单包不支持结构化降级；T001 门禁失败时不得实施或把该故事标为完成，必须返回 Plan 选择替代 parser。
 - [X] T050 [P] [US4] 先写 metadata loader 与有界 APK reader 失败测试，覆盖 `pm path --user` 来源路径、`ProtocolSyncStream.receive`、读取前后 32 MiB 上限、stream close、取消/超时/Session change、顺序读取、10 秒批次、1 MiB/16 MiB 图标上限、LRU 和单包失败不中断于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationMetadataLoaderTest.kt`
   - **验收**: 目标测试因 reader/loader 缺失而失败；fake shell 只接受核心生成命令，fake Sync 证明成功/异常/取消均关闭，且无 cache/files/external storage 或公开 SAF 下载调用。
-- [ ] T050A [US4] 修正 metadata reader 取消测试的协程调度夹具于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationMetadataLoaderTest.kt`
+- [X] T050A [US4] 修正 metadata reader 取消测试的协程调度夹具于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationMetadataLoaderTest.kt`
   - **验收**: 取消协程在独立 dispatcher 启动后才由测试线程等待 fake Sync 进入；用例不因 `runBlocking` 同线程饥饿而误报，仍证明取消关闭 stream。
 - [ ] T051 [US4] 实现内部有界 APK reader 与渐进 metadata loader 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/applications/BoundedRemoteApkReader.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/applications/ApplicationMetadataLoader.kt`
   - **验收**: T050 通过；只接受 PackageManager 解析路径并复用内部 Sync adapter，逐包处理且总预算 10 秒，超限立即停止接收，所有路径关闭 stream；取消/Session change 后不交付旧 update并释放 APK bytes/icon cache。

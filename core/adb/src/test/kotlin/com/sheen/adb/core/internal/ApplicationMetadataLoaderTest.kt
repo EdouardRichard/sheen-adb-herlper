@@ -122,7 +122,7 @@ class ApplicationMetadataLoaderTest {
             Dispatchers.Default,
             cancellationGrace = 100.milliseconds,
         )
-        val operation = async {
+        val operation = async(Dispatchers.Default) {
             cancelReader.read(RemoteApkReadRequest("com.example.fixture", 0, "session-a", 5.seconds))
         }
         assertTrue(cancelReceive.entered.await(1, TimeUnit.SECONDS))
