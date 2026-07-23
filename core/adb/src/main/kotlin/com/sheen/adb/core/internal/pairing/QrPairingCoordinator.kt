@@ -3,6 +3,7 @@ package com.sheen.adb.core.internal.pairing
 import com.sheen.adb.core.PairingAttemptId
 import com.sheen.adb.core.PairingAttemptPhase
 import com.sheen.adb.core.PairingSecret
+import com.sheen.adb.core.QrPairingMaterial
 import com.sheen.adb.core.WirelessObservationId
 import com.sheen.adb.core.WirelessServiceObservation
 import com.sheen.adb.core.WirelessServiceStatus
@@ -28,7 +29,7 @@ internal class QrPairingCoordinator(
         val password = randomChars(PASSWORD_LENGTH, PASSWORD_ALPHABET)
         val now = clock.nowMillis()
         val deadline = if (now > Long.MAX_VALUE - DEFAULT_TTL_MILLIS) Long.MAX_VALUE else now + DEFAULT_TTL_MILLIS
-        val material = QrPairingMaterial(
+        val material = ManagedQrPairingMaterial(
             attemptId = attemptId,
             serviceInstance = serviceInstance,
             deadlineMillis = deadline,
@@ -143,7 +144,7 @@ internal class QrPairingCoordinator(
 
     private class ActiveQrAttempt(
         val attemptId: PairingAttemptId,
-        val material: QrPairingMaterial,
+        val material: ManagedQrPairingMaterial,
         var phase: PairingAttemptPhase,
     )
 
@@ -164,12 +165,12 @@ internal class QrPairingCoordinator(
     }
 }
 
-internal class QrPairingMaterial(
-    val attemptId: PairingAttemptId,
+private class ManagedQrPairingMaterial(
+    override val attemptId: PairingAttemptId,
     serviceInstance: String,
-    val deadlineMillis: Long,
+    override val deadlineMillis: Long,
     private val password: CharArray,
-) {
+) : QrPairingMaterial {
     private val lock = Any()
     private val pairingSecretReference = PairingSecret(password)
     private var active = true
@@ -179,7 +180,7 @@ internal class QrPairingMaterial(
     val serviceInstance: String?
         get() = synchronized(lock) { serviceInstanceReference }
 
-    val payload: String?
+    override val payload: String?
         get() = synchronized(lock) { payloadReference }
 
     val pairingSecret: PairingSecret

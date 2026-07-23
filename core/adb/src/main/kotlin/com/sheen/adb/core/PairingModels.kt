@@ -31,6 +31,12 @@ class PairingSecret(
     override fun toString(): String = "PairingSecret(redacted)"
 }
 
+interface QrPairingMaterial {
+    val attemptId: PairingAttemptId
+    val deadlineMillis: Long
+    val payload: String?
+}
+
 enum class PairingMethod {
     NONE,
     QR,
