@@ -1,5 +1,16 @@
 package com.sheen.adbhelper
 
+import android.Manifest
+import android.content.ActivityNotFoundException
+import android.app.KeyguardManager
+import android.app.NotificationManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -30,6 +41,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
@@ -73,6 +85,7 @@ internal enum class Destination(val label: String, val requiresConnection: Boole
 
 @Composable
 fun SheenApp(container: AppContainer, files: FilesViewModel) {
+    val context = LocalContext.current
     val devices: DevicesViewModel = viewModel(factory = factory {
         DevicesViewModel(container.adbManager, container.deviceProfiles)
     })
@@ -92,9 +105,58 @@ fun SheenApp(container: AppContainer, files: FilesViewModel) {
         )
     })
     val devicesState by devices.state.collectAsStateWithLifecycle()
+    val localPairingControllerState by container.localPairingBridge.state.collectAsStateWithLifecycle()
     val filesState by files.state.collectAsStateWithLifecycle()
     val connected = devicesState.connectionState is AdbConnectionState.Connected
     var destination by rememberSaveable { mutableStateOf(Destination.DEVICES) }
+    var handledNotificationPermissionGeneration by rememberSaveable { mutableStateOf(0L) }
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        val available = granted && context.notificationsEnabled()
+        container.localPairingBridge.onNotificationPermissionResult(
+            granted = available,
+            deviceUnlocked = context.isDeviceUnlocked(),
+        )
+        devices.onLocalNotificationPermissionResult(available)
+    }
+
+    LaunchedEffect(localPairingControllerState) {
+        container.localPairingBridge.synchronizeService()
+    }
+
+    LaunchedEffect(devicesState.notificationPermissionRequestGeneration) {
+        val requestGeneration = devicesState.notificationPermissionRequestGeneration
+        if (requestGeneration == 0L || requestGeneration <= handledNotificationPermissionGeneration) {
+            return@LaunchedEffect
+        }
+        handledNotificationPermissionGeneration = requestGeneration
+        if (Build.VERSION.SDK_INT < 33 ||
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        ) {
+            val available = context.notificationsEnabled()
+            container.localPairingBridge.onNotificationPermissionResult(
+                granted = available,
+                deviceUnlocked = context.isDeviceUnlocked(),
+            )
+            devices.onLocalNotificationPermissionResult(available)
+        } else {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
+    val openWirelessDebuggingSettings = {
+        try {
+            context.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DEVELOPMENT_SETTINGS)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        } catch (_: ActivityNotFoundException) {
+            context.startActivity(
+                Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            )
+        }
+    }
 
     LaunchedEffect(connected) {
         destination = destinationAfterConnectionChange(destination, connected)
@@ -114,7 +176,10 @@ fun SheenApp(container: AppContainer, files: FilesViewModel) {
         if (maxWidth >= 700.dp) {
             Row(Modifier.fillMaxSize()) {
                 PermanentDrawerSheet(Modifier.width(SheenDimensions.expandedPaneWidth).fillMaxHeight()) {
-                    DrawerContent(destination, connected, { destination = it }, devices::prefillLocalhost)
+                    DrawerContent(destination, connected, { destination = it }) {
+                        devices.enterLocalPairingMode()
+                        destination = Destination.DEVICES
+                    }
                 }
                 AppScaffold(
                     destination,
@@ -129,7 +194,18 @@ fun SheenApp(container: AppContainer, files: FilesViewModel) {
                         )
                     },
                 ) {
-                    DestinationContent(destination, devices, overview, files, apps, shell, processes, logcat, settings)
+                    DestinationContent(
+                        destination,
+                        devices,
+                        overview,
+                        files,
+                        apps,
+                        shell,
+                        processes,
+                        logcat,
+                        settings,
+                        openWirelessDebuggingSettings,
+                    )
                 }
             }
         } else {
@@ -144,7 +220,7 @@ fun SheenApp(container: AppContainer, files: FilesViewModel) {
                             connected,
                             onDestination = { destination = it; scope.launch { drawer.close() } },
                             onLocal = {
-                                devices.prefillLocalhost()
+                                devices.enterLocalPairingMode()
                                 destination = Destination.DEVICES
                                 scope.launch { drawer.close() }
                             },
@@ -165,7 +241,18 @@ fun SheenApp(container: AppContainer, files: FilesViewModel) {
                         )
                     },
                 ) {
-                    DestinationContent(destination, devices, overview, files, apps, shell, processes, logcat, settings)
+                    DestinationContent(
+                        destination,
+                        devices,
+                        overview,
+                        files,
+                        apps,
+                        shell,
+                        processes,
+                        logcat,
+                        settings,
+                        openWirelessDebuggingSettings,
+                    )
                 }
             }
         }
@@ -202,10 +289,10 @@ private fun DrawerContent(
         }
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         NavigationDrawerItem(
-            label = { Text("本机连接") },
+            label = { Text("本机无线配对") },
             selected = false,
             onClick = onLocal,
-            modifier = Modifier.semantics { contentDescription = "本机 127.0.0.1 连接" },
+            modifier = Modifier.semantics { contentDescription = "本机无线调试配对" },
         )
     }
 }
@@ -255,9 +342,10 @@ private fun DestinationContent(
     processes: ProcessesViewModel,
     logcat: LogcatViewModel,
     settings: SettingsViewModel,
+    onOpenWirelessDebuggingSettings: () -> Unit,
 ) {
     when (destination) {
-        Destination.DEVICES -> DevicesRoute(devices)
+        Destination.DEVICES -> DevicesRoute(devices, onOpenWirelessDebuggingSettings)
         Destination.OVERVIEW -> OverviewRoute(overview)
         Destination.FILES -> FilesRoute(files)
         Destination.APPS -> AppsRoute(apps)
@@ -289,3 +377,9 @@ private inline fun <reified T : ViewModel> factory(crossinline create: () -> T):
         @Suppress("UNCHECKED_CAST")
         override fun <R : ViewModel> create(modelClass: Class<R>): R = create() as R
     }
+
+private fun Context.isDeviceUnlocked(): Boolean =
+    !(getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager).isDeviceLocked
+
+private fun Context.notificationsEnabled(): Boolean =
+    (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).areNotificationsEnabled()

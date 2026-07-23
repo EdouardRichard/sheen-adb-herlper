@@ -25,6 +25,9 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -44,26 +47,45 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.sheen.adb.core.AdbConnectionState
 import com.sheen.adb.core.AdbDiagnosticEvent
 import com.sheen.adb.core.AdbDiagnosticOutcome
+import com.sheen.adb.core.LocalPairingDiscoveryStatus
+import com.sheen.adb.core.LocalPairingNotificationState
 import com.sheen.adb.core.PairingMethod
 import com.sheen.adb.data.DeviceProfile
 import com.sheen.adb.ui.SheenDimensions
 
 @Composable
-fun DevicesRoute(viewModel: DevicesViewModel) {
+fun DevicesRoute(
+    viewModel: DevicesViewModel,
+    onOpenWirelessDebuggingSettings: () -> Unit = {},
+) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val pairingState by viewModel.pairingState.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
+    var openingWirelessDebuggingSettings by remember { mutableStateOf(false) }
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) viewModel.closePairing()
+            when (event) {
+                Lifecycle.Event.ON_START -> openingWirelessDebuggingSettings = false
+                Lifecycle.Event.ON_STOP -> if (!openingWirelessDebuggingSettings) viewModel.closePairing()
+                else -> Unit
+            }
         }
         lifecycle.addObserver(observer)
         onDispose {
             lifecycle.removeObserver(observer)
-            viewModel.closePairing()
+            if (!openingWirelessDebuggingSettings) viewModel.closePairing()
         }
     }
-    DevicesScreen(state, pairingState, viewModel)
+    DevicesScreen(
+        state = state,
+        pairingState = pairingState,
+        actions = viewModel,
+        onOpenWirelessDebuggingSettings = {
+            openingWirelessDebuggingSettings = true
+            viewModel.onLocalWirelessSettingsOpened()
+            onOpenWirelessDebuggingSettings()
+        },
+    )
 }
 
 @Composable
@@ -71,6 +93,7 @@ internal fun DevicesScreen(
     state: DevicesUiState,
     pairingState: DevicesPairingState,
     actions: DevicesViewModel,
+    onOpenWirelessDebuggingSettings: () -> Unit = {},
 ) {
     val context = LocalContext.current
     Column(
@@ -114,7 +137,11 @@ internal fun DevicesScreen(
         if (state.connectionState is AdbConnectionState.Connected) {
             OutlinedButton(onClick = actions::disconnect) { Text("断开连接") }
         }
-        PairingCard(state, pairingState, actions)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = actions::enterLocalPairingMode) { Text("本机无线配对") }
+            OutlinedButton(onClick = actions::prefillLocalhost) { Text("手动填写本机调试端口") }
+        }
+        PairingCard(state, pairingState, actions, onOpenWirelessDebuggingSettings)
         Text("最近设备", style = MaterialTheme.typography.titleLarge)
         if (state.profiles.isEmpty()) Text("暂无设备档案。应用不会自动扫描局域网。")
         state.profiles.forEach { profile -> ProfileCard(profile, actions) }
@@ -177,6 +204,7 @@ private fun PairingCard(
     state: DevicesUiState,
     pairingState: DevicesPairingState,
     actions: DevicesViewModel,
+    onOpenWirelessDebuggingSettings: () -> Unit,
 ) {
     val presentation = pairingState.toPresentation()
     Card(Modifier.fillMaxWidth()) {
@@ -184,41 +212,67 @@ private fun PairingCard(
             Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(presentation.title, style = MaterialTheme.typography.titleLarge)
-            Text(presentation.guidance)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                presentation.methodOptions.forEach { method ->
-                    val label = when (method) {
-                        PairingMethod.QR -> "二维码"
-                        PairingMethod.SIX_DIGIT_CODE -> "6 位配对码"
-                        PairingMethod.NONE -> return@forEach
-                    }
-                    if (pairingState.method == method) {
-                        Button(
-                            onClick = { actions.selectPairingMethod(method) },
-                            enabled = !presentation.showCancel,
-                        ) { Text(label) }
-                    } else {
-                        OutlinedButton(
-                            onClick = { actions.selectPairingMethod(method) },
-                            enabled = !presentation.showCancel,
-                        ) { Text(label) }
+            Text(
+                if (pairingState.isLocalMode) "本机无线调试配对" else presentation.title,
+                style = MaterialTheme.typography.titleLarge,
+            )
+            Text(
+                if (pairingState.isLocalMode) {
+                    "先打开系统无线调试，再选择“使用配对码配对设备”。应用会自动查找本机配对端口。"
+                } else {
+                    presentation.guidance
+                },
+            )
+            if (!pairingState.isLocalMode) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    presentation.methodOptions.forEach { method ->
+                        val label = when (method) {
+                            PairingMethod.QR -> "二维码"
+                            PairingMethod.SIX_DIGIT_CODE -> "6 位配对码"
+                            PairingMethod.NONE -> return@forEach
+                        }
+                        if (pairingState.method == method) {
+                            Button(
+                                onClick = { actions.selectPairingMethod(method) },
+                                enabled = !presentation.showCancel,
+                            ) { Text(label) }
+                        } else {
+                            OutlinedButton(
+                                onClick = { actions.selectPairingMethod(method) },
+                                enabled = !presentation.showCancel,
+                            ) { Text(label) }
+                        }
                     }
                 }
             }
-            Text(presentation.statusText, color = MaterialTheme.colorScheme.primary)
+            Text(
+                if (pairingState.isLocalMode) pairingState.localStatusText() else presentation.statusText,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            if (pairingState.isLocalMode) {
+                Text(pairingState.localNotificationText())
+                if (pairingState.suggestNativeNotificationStyle) {
+                    Text(
+                        "当前系统通知样式可能不支持通知栏内输入。请改用系统原生通知样式，或直接在应用内输入配对码。",
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                Button(onClick = onOpenWirelessDebuggingSettings) { Text("打开系统无线调试设置") }
+            }
             if (presentation.showQrMatrix) {
                 pairingState.qrMatrix?.let {
                     QrMatrixImage(it, Modifier.align(Alignment.CenterHorizontally))
                 }
             }
             if (presentation.showCodeInputs) {
-                OutlinedTextField(
-                    state.pairingEndpointInput,
-                    actions::updatePairingEndpoint,
-                    label = { Text("IP:配对端口") },
-                    singleLine = true,
-                )
+                if (!pairingState.isLocalMode) {
+                    OutlinedTextField(
+                        state.pairingEndpointInput,
+                        actions::updatePairingEndpoint,
+                        label = { Text("IP:配对端口") },
+                        singleLine = true,
+                    )
+                }
                 OutlinedTextField(
                     state.pairingCode,
                     actions::updatePairingCode,
@@ -239,7 +293,13 @@ private fun PairingCard(
                     OutlinedButton(onClick = actions::onPairingPageLeft) { Text("取消") }
                 }
                 if (presentation.showRetry) {
-                    Button(onClick = actions::retryPairing) { Text("重新开始") }
+                    Button(
+                        onClick = if (pairingState.isLocalMode) {
+                            actions::retryLocalPairingMode
+                        } else {
+                            actions::retryPairing
+                        },
+                    ) { Text("重新开始") }
                 }
                 if (presentation.showCodeFallback) {
                     Button(
@@ -252,6 +312,24 @@ private fun PairingCard(
             }
         }
     }
+}
+
+private fun DevicesPairingState.localStatusText(): String = when (localDiscoveryStatus) {
+    LocalPairingDiscoveryStatus.IDLE -> "等待开始本机端口扫描"
+    LocalPairingDiscoveryStatus.SEARCHING -> "正在扫描本机无线调试配对端口"
+    LocalPairingDiscoveryStatus.FOUND -> "已发现本机配对端口，请输入系统显示的 6 位配对码"
+    LocalPairingDiscoveryStatus.NOT_FOUND -> "暂未发现配对端口，请确认系统配对码对话框保持打开"
+    LocalPairingDiscoveryStatus.AMBIGUOUS -> "发现多个本机配对端口，请在系统设置中保留当前配对窗口后重试"
+    LocalPairingDiscoveryStatus.UNSUPPORTED -> "当前系统未提供可发现的本机无线调试配对服务"
+    LocalPairingDiscoveryStatus.STOPPED -> "本机配对端口扫描已停止"
+}
+
+private fun DevicesPairingState.localNotificationText(): String = when (localNotificationState) {
+    LocalPairingNotificationState.HIDDEN -> "应用内配对码输入始终可用；通知栏输入正在准备"
+    LocalPairingNotificationState.PRIVATE_LOCKED -> "设备已锁定；通知不会显示或接收配对码，解锁后可继续"
+    LocalPairingNotificationState.INPUT_READY -> "也可直接在通知栏输入 6 位配对码"
+    LocalPairingNotificationState.INPUT_UNAVAILABLE -> "通知栏输入不可用，请在应用内输入配对码"
+    LocalPairingNotificationState.RESULT -> "通知栏配对操作已结束"
 }
 
 @Composable
