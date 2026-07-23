@@ -258,7 +258,7 @@
   - **验收**: 目标测试在现有 name/PID-only 实现上失败；只读快照不产生 kill/force-stop effect。
 - [X] T065 [US5] 实现进程分析状态、筛选和 Compose 展示于 `feature/processes/src/main/kotlin/com/sheen/adb/feature/processes/ProcessesViewModel.kt` 和 `feature/processes/src/main/kotlin/com/sheen/adb/feature/processes/ProcessesScreen.kt`
   - **验收**: T064 与 `:feature:processes:testDebugUnitTest` 通过；结果区分 empty/exited/unsupported/cancelled/disconnected，筛选 1 秒内更新且没有进程控制入口。
-- [ ] T066 [P] [US5] 先写 Logcat window Feature 失败测试，覆盖结构化记录、全部筛选、AND、pause/resume/clear、10k/4MiB、100 可见、generation 和当前可见导出于 `feature/logcat/src/test/kotlin/com/sheen/adb/feature/logcat/LogcatAnalysisWindowTest.kt`
+- [X] T066 [P] [US5] 先写 Logcat window Feature 失败测试，覆盖结构化记录、全部筛选、AND、pause/resume/clear、10k/4MiB、100 可见、generation 和当前可见导出于 `feature/logcat/src/test/kotlin/com/sheen/adb/feature/logcat/LogcatAnalysisWindowTest.kt`
   - **验收**: 目标测试在现有 keyword-only window 上失败；导出断言只含当前可见匹配内容，未知关联不误归属。
 - [ ] T067 [US5] 扩展有界 window 与 ViewModel 分析状态于 `feature/logcat/src/main/kotlin/com/sheen/adb/feature/logcat/LogcatBuffer.kt` 和 `feature/logcat/src/main/kotlin/com/sheen/adb/feature/logcat/LogcatViewModel.kt`
   - **验收**: T066、既有 `LogcatBufferTest` 和导出回归通过；过滤变化不重读无界历史，停止/离页/Session change 清除关联并拒绝旧流。
