@@ -3,12 +3,15 @@ package com.sheen.adb.feature.devices
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -22,8 +25,13 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
@@ -36,12 +44,14 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.sheen.adb.core.AdbConnectionState
 import com.sheen.adb.core.AdbDiagnosticEvent
 import com.sheen.adb.core.AdbDiagnosticOutcome
+import com.sheen.adb.core.PairingMethod
 import com.sheen.adb.data.DeviceProfile
 import com.sheen.adb.ui.SheenDimensions
 
 @Composable
 fun DevicesRoute(viewModel: DevicesViewModel) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val pairingState by viewModel.pairingState.collectAsStateWithLifecycle()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
         val observer = LifecycleEventObserver { _, event ->
@@ -53,11 +63,15 @@ fun DevicesRoute(viewModel: DevicesViewModel) {
             viewModel.closePairing()
         }
     }
-    DevicesScreen(state, viewModel)
+    DevicesScreen(state, pairingState, viewModel)
 }
 
 @Composable
-fun DevicesScreen(state: DevicesUiState, actions: DevicesViewModel) {
+internal fun DevicesScreen(
+    state: DevicesUiState,
+    pairingState: DevicesPairingState,
+    actions: DevicesViewModel,
+) {
     val context = LocalContext.current
     Column(
         Modifier.verticalScroll(rememberScrollState()).padding(SheenDimensions.screenPadding),
@@ -100,6 +114,7 @@ fun DevicesScreen(state: DevicesUiState, actions: DevicesViewModel) {
         if (state.connectionState is AdbConnectionState.Connected) {
             OutlinedButton(onClick = actions::disconnect) { Text("断开连接") }
         }
+        PairingCard(state, pairingState, actions)
         Text("最近设备", style = MaterialTheme.typography.titleLarge)
         if (state.profiles.isEmpty()) Text("暂无设备档案。应用不会自动扫描局域网。")
         state.profiles.forEach { profile -> ProfileCard(profile, actions) }
@@ -108,7 +123,20 @@ fun DevicesScreen(state: DevicesUiState, actions: DevicesViewModel) {
         }
         if (state.showDiagnostics) DiagnosticsCard(state.diagnosticEvents, actions::clearDiagnostics)
     }
-    if (state.showPairing) PairingDialog(state, actions)
+    val pairingPresentation = pairingState.toPresentation()
+    if (pairingPresentation.showSessionReplacementConfirmation) {
+        AlertDialog(
+            onDismissRequest = actions::dismissPairingSessionReplacement,
+            title = { Text("断开当前设备？") },
+            text = { Text(pairingPresentation.sessionReplacementText) },
+            confirmButton = {
+                TextButton(onClick = actions::confirmPairingSessionReplacement) { Text("断开并继续") }
+            },
+            dismissButton = {
+                TextButton(onClick = actions::dismissPairingSessionReplacement) { Text("保留当前连接") }
+            },
+        )
+    }
     state.pendingRenameProfile?.let {
         AlertDialog(
             onDismissRequest = actions::dismissRename,
@@ -145,13 +173,46 @@ private fun ProfileCard(profile: DeviceProfile, actions: DevicesViewModel) {
 }
 
 @Composable
-private fun PairingDialog(state: DevicesUiState, actions: DevicesViewModel) {
-    AlertDialog(
-        onDismissRequest = actions::closePairing,
-        title = { Text("使用 6 位配对码") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("在被控端打开“无线调试 → 使用配对码配对设备”。配对端口与调试端口不同。")
+private fun PairingCard(
+    state: DevicesUiState,
+    pairingState: DevicesPairingState,
+    actions: DevicesViewModel,
+) {
+    val presentation = pairingState.toPresentation()
+    Card(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(presentation.title, style = MaterialTheme.typography.titleLarge)
+            Text(presentation.guidance)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                presentation.methodOptions.forEach { method ->
+                    val label = when (method) {
+                        PairingMethod.QR -> "二维码"
+                        PairingMethod.SIX_DIGIT_CODE -> "6 位配对码"
+                        PairingMethod.NONE -> return@forEach
+                    }
+                    if (pairingState.method == method) {
+                        Button(
+                            onClick = { actions.selectPairingMethod(method) },
+                            enabled = !presentation.showCancel,
+                        ) { Text(label) }
+                    } else {
+                        OutlinedButton(
+                            onClick = { actions.selectPairingMethod(method) },
+                            enabled = !presentation.showCancel,
+                        ) { Text(label) }
+                    }
+                }
+            }
+            Text(presentation.statusText, color = MaterialTheme.colorScheme.primary)
+            if (presentation.showQrMatrix) {
+                pairingState.qrMatrix?.let {
+                    QrMatrixImage(it, Modifier.align(Alignment.CenterHorizontally))
+                }
+            }
+            if (presentation.showCodeInputs) {
                 OutlinedTextField(
                     state.pairingEndpointInput,
                     actions::updatePairingEndpoint,
@@ -167,10 +228,56 @@ private fun PairingDialog(state: DevicesUiState, actions: DevicesViewModel) {
                     singleLine = true,
                 )
             }
-        },
-        confirmButton = { TextButton(onClick = actions::pair, enabled = state.pairingCode.length == 6) { Text("配对") } },
-        dismissButton = { TextButton(onClick = actions::closePairing) { Text("取消") } },
-    )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                if (presentation.showStart) {
+                    Button(onClick = actions::startSelectedPairing) { Text("开始配对") }
+                }
+                if (presentation.showCodeInputs) {
+                    Button(onClick = actions::pair, enabled = presentation.submitCodeEnabled) { Text("提交配对码") }
+                }
+                if (presentation.showCancel) {
+                    OutlinedButton(onClick = actions::onPairingPageLeft) { Text("取消") }
+                }
+                if (presentation.showRetry) {
+                    Button(onClick = actions::retryPairing) { Text("重新开始") }
+                }
+                if (presentation.showCodeFallback) {
+                    Button(
+                        onClick = {
+                            actions.selectPairingMethod(PairingMethod.SIX_DIGIT_CODE)
+                            actions.startSelectedPairing()
+                        },
+                    ) { Text("改用 6 位配对码") }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QrMatrixImage(
+    matrix: QrMatrix,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(
+        modifier
+            .size(256.dp)
+            .background(Color.White)
+            .clearAndSetSemantics { },
+    ) {
+        val moduleSize = size.minDimension / matrix.size
+        for (y in 0 until matrix.size) {
+            for (x in 0 until matrix.size) {
+                if (matrix[x, y]) {
+                    drawRect(
+                        color = Color.Black,
+                        topLeft = Offset(x * moduleSize, y * moduleSize),
+                        size = Size(moduleSize, moduleSize),
+                    )
+                }
+            }
+        }
+    }
 }
 
 @Composable
