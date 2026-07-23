@@ -36,6 +36,10 @@ import com.sheen.adb.core.PairingAttemptPhase
 import com.sheen.adb.core.PairingMethod
 import com.sheen.adb.core.PairingSecret
 import com.sheen.adb.core.ProcessSnapshot
+import com.sheen.adb.core.ProcessAnalysisSnapshot
+import com.sheen.adb.core.ProcessApplicationAssociation
+import com.sheen.adb.core.ProcessAssociationUnknownReason
+import com.sheen.adb.core.ProcessRecordAssociation
 import com.sheen.adb.core.QrPairingMaterial
 import com.sheen.adb.core.RemoteApplication
 import com.sheen.adb.core.RemoteApplicationEnabledState
@@ -50,6 +54,10 @@ import com.sheen.adb.core.RemoteUploadCommitReceipt
 import com.sheen.adb.core.RemoteUploadPlan
 import com.sheen.adb.core.ShellResult
 import com.sheen.adb.core.ShellOutputMode
+import com.sheen.adb.core.StructuredLogcatKind
+import com.sheen.adb.core.StructuredLogcatLevel
+import com.sheen.adb.core.StructuredLogcatRecord
+import com.sheen.adb.core.StructuredLogcatTimestamp
 import com.sheen.adb.core.WirelessAddress
 import com.sheen.adb.core.WirelessDiscoveryEvent
 import com.sheen.adb.core.WirelessDiscoveryMode
@@ -72,6 +80,8 @@ import com.sheen.adb.core.internal.applications.ApplicationMetadataParser
 import com.sheen.adb.core.internal.applications.BoundedRemoteApkReader
 import com.sheen.adb.core.internal.applications.ParsedApplicationIconKind
 import com.sheen.adb.core.internal.applications.RemoteApkReader
+import com.sheen.adb.core.internal.diagnostics.ProcessAssociation
+import com.sheen.adb.core.internal.diagnostics.StructuredLogcatParser
 import com.sheen.adb.core.internal.discovery.WirelessDiscoveryReducer
 import com.sheen.adb.core.internal.pairing.MonotonicClock
 import com.sheen.adb.core.internal.pairing.LocalPairingCoordinator
@@ -263,6 +273,7 @@ internal class DefaultAdbSessionManager(
     private val closed = AtomicBoolean(false)
     private val diagnosticSequence = AtomicLong(0)
     private val wirelessDiscoveryGeneration = AtomicLong(0)
+    private val processAnalysisGeneration = AtomicLong(0)
     @Volatile
     private var active: ActiveSession? = null
     @Volatile
@@ -276,6 +287,8 @@ internal class DefaultAdbSessionManager(
     private val applicationMetadataMutex = Mutex()
     private var applicationMetadataLoader: ApplicationMetadataLoader? = null
     private var applicationMetadataLoaderSessionId: String? = null
+    @Volatile
+    private var latestProcessAnalysis: ProcessAnalysisSnapshot? = null
     private val mutableState = MutableStateFlow<AdbConnectionState>(AdbConnectionState.Disconnected())
     override val connectionState: StateFlow<AdbConnectionState> = mutableState.asStateFlow()
     private val mutableDiagnosticEvents = MutableStateFlow<List<AdbDiagnosticEvent>>(emptyList())
@@ -1597,6 +1610,67 @@ internal class DefaultAdbSessionManager(
         }
     }
 
+    override suspend fun loadProcessAnalysis(
+        expectedSessionId: String,
+        timeout: Duration,
+    ): AdbOperationResult<ProcessAnalysisSnapshot> {
+        val initialSession = mutex.withLock { active }
+        if (initialSession == null || initialSession.id != expectedSessionId) {
+            return applicationFailure(
+                AdbError.ApplicationSessionInvalid(AdbOperationStage.PROCESSES),
+                initialSession?.endpoint,
+            )
+        }
+        return try {
+            withTimeout(timeout) {
+                val applications = when (val result = listApplications(timeout)) {
+                    is AdbOperationResult.Success -> result.value
+                    is AdbOperationResult.Failure -> return@withTimeout result
+                    AdbOperationResult.Cancelled -> return@withTimeout AdbOperationResult.Cancelled
+                }
+                if (applications.sessionId != expectedSessionId || mutex.withLock { active?.id } != expectedSessionId) {
+                    return@withTimeout applicationFailure(
+                        AdbError.ApplicationSessionInvalid(AdbOperationStage.PROCESSES),
+                        initialSession.endpoint,
+                    )
+                }
+                val processes = when (val result = listProcesses(timeout)) {
+                    is AdbOperationResult.Success -> result.value
+                    is AdbOperationResult.Failure -> return@withTimeout result
+                    AdbOperationResult.Cancelled -> return@withTimeout AdbOperationResult.Cancelled
+                }
+                if (mutex.withLock { active?.id } != expectedSessionId) {
+                    return@withTimeout applicationFailure(
+                        AdbError.ApplicationSessionInvalid(AdbOperationStage.PROCESSES),
+                        initialSession.endpoint,
+                    )
+                }
+                val generation = processAnalysisGeneration.incrementAndGet()
+                val analysis = ProcessAssociation.resolve(
+                    expectedSessionId = expectedSessionId,
+                    applicationSessionId = applications.sessionId,
+                    expectedGeneration = generation,
+                    applicationGeneration = generation,
+                    applications = applications.applications,
+                    processes = processes.processes,
+                    degradedReason = processes.degradedReason,
+                )
+                if (mutex.withLock { active?.id } != expectedSessionId) {
+                    return@withTimeout applicationFailure(
+                        AdbError.ApplicationSessionInvalid(AdbOperationStage.PROCESSES),
+                        initialSession.endpoint,
+                    )
+                }
+                latestProcessAnalysis = analysis
+                AdbOperationResult.Success(analysis)
+            }
+        } catch (_: TimeoutCancellationException) {
+            applicationFailure(AdbError.Timeout(AdbOperationStage.PROCESSES), initialSession.endpoint)
+        } catch (_: CancellationException) {
+            AdbOperationResult.Cancelled
+        }
+    }
+
     override suspend fun listApplications(timeout: Duration): AdbOperationResult<ApplicationSnapshot> =
         applicationMutex.withLock {
             val session = mutex.withLock { active } ?: return@withLock applicationFailure(
@@ -1668,6 +1742,7 @@ internal class DefaultAdbSessionManager(
                         }
                     if (!stillOwned) {
                         clearApplicationMetadata()
+                        clearProcessAnalysis()
                         emit(
                             AdbOperationResult.Success(
                                 ApplicationMetadataUpdate(
@@ -1704,6 +1779,7 @@ internal class DefaultAdbSessionManager(
                     active = null
                     applicationSnapshot = null
                     clearApplicationMetadata()
+                    clearProcessAnalysis()
                     mutableState.value = AdbConnectionState.Disconnected()
                 }
             },
@@ -1755,6 +1831,10 @@ internal class DefaultAdbSessionManager(
         applicationMetadataLoader?.clear()
         applicationMetadataLoader = null
         applicationMetadataLoaderSessionId = null
+    }
+
+    private fun clearProcessAnalysis() {
+        latestProcessAnalysis = null
     }
 
     private class ApplicationMetadataOwnershipLost : RuntimeException()
@@ -2153,6 +2233,125 @@ internal class DefaultAdbSessionManager(
         }
     }
 
+    override fun streamStructuredLogcat(
+        config: LogcatConfig,
+        expectedSessionId: String,
+        expectedProcessGeneration: Long,
+    ): Flow<AdbOperationResult<StructuredLogcatRecord>> = flow {
+        val snapshot = latestProcessAnalysis
+        val session = mutex.withLock { active }
+        if (session == null || session.id != expectedSessionId || snapshot == null ||
+            snapshot.sessionId != expectedSessionId || snapshot.generation != expectedProcessGeneration
+        ) {
+            emit(AdbOperationResult.Failure(AdbError.RemoteClosed(AdbOperationStage.LOGCAT)))
+            return@flow
+        }
+
+        var sequence = 0L
+        try {
+            streamLogcat(config).collect { result ->
+                val stillOwned = mutex.withLock { active?.id == expectedSessionId } &&
+                    latestProcessAnalysis?.let {
+                        it.sessionId == expectedSessionId && it.generation == expectedProcessGeneration
+                    } == true
+                if (!stillOwned) throw StructuredDiagnosticOwnershipLost()
+                when (result) {
+                    is AdbOperationResult.Success -> {
+                        val parsed = StructuredLogcatParser.parse(
+                            sequence = sequence++,
+                            rawText = result.value.text,
+                            fromStandardError = result.value.fromStandardError,
+                        )
+                        emit(
+                            AdbOperationResult.Success(
+                                parsed.toPublicStructuredRecord(expectedSessionId, snapshot),
+                            ),
+                        )
+                    }
+                    is AdbOperationResult.Failure -> {
+                        if (result.error !is AdbError.CommandStreamClosed) emit(result)
+                    }
+                    AdbOperationResult.Cancelled -> emit(AdbOperationResult.Cancelled)
+                }
+            }
+        } catch (_: StructuredDiagnosticOwnershipLost) {
+            Unit
+        }
+    }
+
+    private fun com.sheen.adb.core.internal.diagnostics.StructuredLogcatRecord.toPublicStructuredRecord(
+        sessionId: String,
+        snapshot: ProcessAnalysisSnapshot,
+    ): StructuredLogcatRecord {
+        val processAssociation = associateStructuredRecord(snapshot)
+        return StructuredLogcatRecord(
+            sessionId = sessionId,
+            snapshotGeneration = snapshot.generation,
+            sequence = sequence,
+            rawText = rawText,
+            kind = when (kind) {
+                com.sheen.adb.core.internal.diagnostics.StructuredLogcatKind.PARSED -> StructuredLogcatKind.PARSED
+                com.sheen.adb.core.internal.diagnostics.StructuredLogcatKind.UNPARSED -> StructuredLogcatKind.UNPARSED
+                com.sheen.adb.core.internal.diagnostics.StructuredLogcatKind.STDERR -> StructuredLogcatKind.STDERR
+            },
+            timestamp = timestamp?.let {
+                StructuredLogcatTimestamp(it.month, it.day, it.hour, it.minute, it.second, it.millisecond)
+            },
+            uid = uid,
+            pid = pid,
+            tid = tid,
+            level = when (level) {
+                com.sheen.adb.core.internal.diagnostics.StructuredLogcatLevel.VERBOSE -> StructuredLogcatLevel.VERBOSE
+                com.sheen.adb.core.internal.diagnostics.StructuredLogcatLevel.DEBUG -> StructuredLogcatLevel.DEBUG
+                com.sheen.adb.core.internal.diagnostics.StructuredLogcatLevel.INFO -> StructuredLogcatLevel.INFO
+                com.sheen.adb.core.internal.diagnostics.StructuredLogcatLevel.WARN -> StructuredLogcatLevel.WARN
+                com.sheen.adb.core.internal.diagnostics.StructuredLogcatLevel.ERROR -> StructuredLogcatLevel.ERROR
+                com.sheen.adb.core.internal.diagnostics.StructuredLogcatLevel.FATAL -> StructuredLogcatLevel.FATAL
+                com.sheen.adb.core.internal.diagnostics.StructuredLogcatLevel.ASSERT -> StructuredLogcatLevel.ASSERT
+                null -> null
+            },
+            tag = tag,
+            message = message,
+            processName = processAssociation.processName,
+            applicationAssociation = processAssociation.applicationAssociation,
+        )
+    }
+
+    private fun com.sheen.adb.core.internal.diagnostics.StructuredLogcatRecord.associateStructuredRecord(
+        snapshot: ProcessAnalysisSnapshot,
+    ): ProcessRecordAssociation {
+        val recordPid = pid ?: return ProcessRecordAssociation(
+            processName = null,
+            applicationAssociation = ProcessApplicationAssociation.Unknown(ProcessAssociationUnknownReason.NO_MATCH),
+        )
+        val entry = snapshot.entries.singleOrNull { it.process.pid == recordPid }
+            ?: return ProcessRecordAssociation(
+                processName = null,
+                applicationAssociation = ProcessApplicationAssociation.Unknown(
+                    ProcessAssociationUnknownReason.PROCESS_EXITED,
+                ),
+            )
+        val logIdentity = AndroidUidIdentity.fromRawUid(uid)
+            ?: return ProcessRecordAssociation(
+                processName = entry.process.name,
+                applicationAssociation = ProcessApplicationAssociation.Unknown(
+                    ProcessAssociationUnknownReason.MISSING_UID,
+                ),
+            )
+        val processIdentity = ProcessAssociation.parseProcessUid(entry.process.uid)
+        if (processIdentity == null || processIdentity != logIdentity) {
+            return ProcessRecordAssociation(
+                processName = null,
+                applicationAssociation = ProcessApplicationAssociation.Unknown(
+                    ProcessAssociationUnknownReason.PID_REUSED,
+                ),
+            )
+        }
+        return ProcessAssociation.associatePid(snapshot, snapshot.sessionId, snapshot.generation, recordPid)
+    }
+
+    private class StructuredDiagnosticOwnershipLost : RuntimeException()
+
     private suspend fun claimWirelessDiscovery(mode: WirelessDiscoveryMode): ActiveWirelessDiscovery? = mutex.withLock {
         synchronized(wirelessDiscoveryLock) {
             if (closed.get() || activeWirelessDiscovery != null) return@synchronized null
@@ -2334,11 +2533,13 @@ internal class DefaultAdbSessionManager(
             active = null
             applicationSnapshot = null
             clearApplicationMetadata()
+            clearProcessAnalysis()
             failure(AdbError.Timeout(AdbOperationStage.DISCONNECT), null, error)
         } catch (error: CancellationException) {
             active = null
             applicationSnapshot = null
             clearApplicationMetadata()
+            clearProcessAnalysis()
             mutableState.value = AdbConnectionState.Disconnected(DisconnectionReason.DISCONNECT_CANCELLED)
             appendDiagnostic(AdbOperationStage.DISCONNECT, AdbDiagnosticOutcome.CANCELLED, "ADB_DISCONNECT_CANCELLED", null)
             AdbOperationResult.Cancelled
@@ -2346,6 +2547,7 @@ internal class DefaultAdbSessionManager(
             active = null
             applicationSnapshot = null
             clearApplicationMetadata()
+            clearProcessAnalysis()
             failure(AdbExceptionMapper.map(error, AdbOperationStage.DISCONNECT), null, error)
         } finally {
             if (sessionToClose != null) {
@@ -2396,6 +2598,7 @@ internal class DefaultAdbSessionManager(
             active = null
             applicationSnapshot = null
             clearApplicationMetadata()
+            clearProcessAnalysis()
             invalidateExclusiveOperation(session?.id)
             runCatching { session?.client?.close() }
             if (session != null) {
@@ -2415,6 +2618,7 @@ internal class DefaultAdbSessionManager(
         active = null
         applicationSnapshot = null
         clearApplicationMetadata()
+        clearProcessAnalysis()
         invalidateExclusiveOperation(session.id)
         try {
             session.client.close()
@@ -2433,6 +2637,7 @@ internal class DefaultAdbSessionManager(
             active = null
             applicationSnapshot = null
             clearApplicationMetadata()
+            clearProcessAnalysis()
             terminateActiveWirelessDiscovery(AdbError.DiscoverySessionChanged)
         }
         invalidateExclusiveOperation(session.id)
@@ -2450,6 +2655,7 @@ internal class DefaultAdbSessionManager(
         active = null
         applicationSnapshot = null
         clearApplicationMetadata()
+        clearProcessAnalysis()
         terminateActiveWirelessDiscovery(AdbError.DiscoverySessionChanged)
         invalidateExclusiveOperation(session.id)
         mutableState.value = AdbConnectionState.Disconnected()

@@ -215,6 +215,13 @@ interface AdbSessionManager : AutoCloseable {
 
     suspend fun listProcesses(timeout: Duration = 15.seconds): AdbOperationResult<ProcessSnapshot>
 
+    suspend fun loadProcessAnalysis(
+        expectedSessionId: String,
+        timeout: Duration = 15.seconds,
+    ): AdbOperationResult<ProcessAnalysisSnapshot> = AdbOperationResult.Failure(
+        AdbError.ApplicationSessionInvalid(AdbOperationStage.PROCESSES),
+    )
+
     suspend fun listApplications(timeout: Duration = 15.seconds): AdbOperationResult<ApplicationSnapshot>
 
     fun observeApplicationMetadata(
@@ -306,6 +313,14 @@ interface AdbSessionManager : AutoCloseable {
     ): AdbOperationResult<ApplicationMutationResult>
 
     fun streamLogcat(config: LogcatConfig): Flow<AdbOperationResult<LogcatLine>>
+
+    fun streamStructuredLogcat(
+        config: LogcatConfig,
+        expectedSessionId: String,
+        expectedProcessGeneration: Long,
+    ): Flow<AdbOperationResult<StructuredLogcatRecord>> = flowOf(
+        AdbOperationResult.Failure(AdbError.RemoteClosed(AdbOperationStage.LOGCAT)),
+    )
 
     suspend fun disconnect(timeout: Duration = 5.seconds): AdbOperationResult<Unit>
 
