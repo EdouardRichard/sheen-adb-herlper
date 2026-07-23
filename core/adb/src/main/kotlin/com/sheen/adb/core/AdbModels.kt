@@ -483,6 +483,7 @@ enum class ProcessAssociationUnknownReason {
     NO_MATCH,
     SESSION_MISMATCH,
     GENERATION_MISMATCH,
+    PID_REUSED,
     PROCESS_EXITED,
 }
 
