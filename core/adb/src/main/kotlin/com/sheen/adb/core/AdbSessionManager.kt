@@ -2,6 +2,7 @@ package com.sheen.adb.core
 
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import java.io.InputStream
 import java.io.OutputStream
@@ -44,9 +45,87 @@ internal fun interface WirelessDiscoverySourceFactory {
     fun create(observer: WirelessDiscoverySourceObserver): WirelessDiscoverySource
 }
 
+enum class LocalPairingDiscoveryStatus {
+    IDLE,
+    SEARCHING,
+    FOUND,
+    NOT_FOUND,
+    AMBIGUOUS,
+    UNSUPPORTED,
+    STOPPED,
+}
+
+data class LocalPairingControllerState(
+    val window: LocalPairingWindow? = null,
+    val discoveryStatus: LocalPairingDiscoveryStatus = LocalPairingDiscoveryStatus.IDLE,
+    val notificationDecision: LocalPairingNotificationDecision? = null,
+    val stopReason: LocalPairingStopReason? = null,
+)
+
+interface LocalPairingController {
+    val state: StateFlow<LocalPairingControllerState>
+
+    fun start(
+        attemptId: PairingAttemptId,
+        windowId: LocalPairingWindowId,
+    ): AdbOperationResult<LocalPairingWindow>
+
+    fun updateNotification(
+        deviceUnlocked: Boolean,
+        capability: LocalPairingNotificationCapability,
+    ): LocalPairingNotificationDecision
+
+    suspend fun submit(
+        windowId: LocalPairingWindowId,
+        secret: PairingSecret,
+    ): AdbOperationResult<Unit>
+
+    fun cancel(windowId: LocalPairingWindowId): AdbOperationResult<Unit>
+
+    fun onSystemTimeout(windowId: LocalPairingWindowId): AdbOperationResult<Unit>
+}
+
+private object UnsupportedLocalPairingController : LocalPairingController {
+    override val state: StateFlow<LocalPairingControllerState> = MutableStateFlow(LocalPairingControllerState())
+
+    override fun start(
+        attemptId: PairingAttemptId,
+        windowId: LocalPairingWindowId,
+    ): AdbOperationResult<LocalPairingWindow> = AdbOperationResult.Failure(AdbError.PairingUnsupported)
+
+    override fun updateNotification(
+        deviceUnlocked: Boolean,
+        capability: LocalPairingNotificationCapability,
+    ): LocalPairingNotificationDecision = LocalPairingNotificationDecision(
+        state = LocalPairingNotificationState.INPUT_UNAVAILABLE,
+        inputActionAvailable = false,
+        submitAllowed = false,
+        actionWindowId = null,
+        applicationInputAvailable = true,
+        suggestNativeNotificationStyle =
+            capability == LocalPairingNotificationCapability.INLINE_INPUT_UNAVAILABLE,
+    )
+
+    override suspend fun submit(
+        windowId: LocalPairingWindowId,
+        secret: PairingSecret,
+    ): AdbOperationResult<Unit> {
+        secret.clear()
+        return AdbOperationResult.Failure(AdbError.PairingUnsupported)
+    }
+
+    override fun cancel(windowId: LocalPairingWindowId): AdbOperationResult<Unit> =
+        AdbOperationResult.Failure(AdbError.PairingUnsupported)
+
+    override fun onSystemTimeout(windowId: LocalPairingWindowId): AdbOperationResult<Unit> =
+        AdbOperationResult.Failure(AdbError.PairingUnsupported)
+}
+
 interface AdbSessionManager : AutoCloseable {
     val connectionState: StateFlow<AdbConnectionState>
     val diagnosticEvents: StateFlow<List<AdbDiagnosticEvent>>
+    val localPairingController: LocalPairingController
+        get() = UnsupportedLocalPairingController
 
     suspend fun acquireExclusiveOperation(
         kind: AdbExclusiveOperationKind,
