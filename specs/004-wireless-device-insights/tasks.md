@@ -260,7 +260,7 @@
   - **验收**: T064 与 `:feature:processes:testDebugUnitTest` 通过；结果区分 empty/exited/unsupported/cancelled/disconnected，筛选 1 秒内更新且没有进程控制入口。
 - [X] T066 [P] [US5] 先写 Logcat window Feature 失败测试，覆盖结构化记录、全部筛选、AND、pause/resume/clear、10k/4MiB、100 可见、generation 和当前可见导出于 `feature/logcat/src/test/kotlin/com/sheen/adb/feature/logcat/LogcatAnalysisWindowTest.kt`
   - **验收**: 目标测试在现有 keyword-only window 上失败；导出断言只含当前可见匹配内容，未知关联不误归属。
-- [ ] T067 [US5] 扩展有界 window 与 ViewModel 分析状态于 `feature/logcat/src/main/kotlin/com/sheen/adb/feature/logcat/LogcatBuffer.kt` 和 `feature/logcat/src/main/kotlin/com/sheen/adb/feature/logcat/LogcatViewModel.kt`
+- [X] T067 [US5] 扩展有界 window 与 ViewModel 分析状态于 `feature/logcat/src/main/kotlin/com/sheen/adb/feature/logcat/LogcatBuffer.kt` 和 `feature/logcat/src/main/kotlin/com/sheen/adb/feature/logcat/LogcatViewModel.kt`
   - **验收**: T066、既有 `LogcatBufferTest` 和导出回归通过；过滤变化不重读无界历史，停止/离页/Session change 清除关联并拒绝旧流。
 - [ ] T068 [US5] 先写 Logcat presentation 失败测试，覆盖 level/tag/keyword/PID/process/app 控件、组合条件摘要、空/截断/解析失败/停止状态和复制/导出确认于 `feature/logcat/src/test/kotlin/com/sheen/adb/feature/logcat/LogcatPresentationTest.kt`
   - **验收**: 目标测试因新展示策略缺失而失败；文案不包含真实 package/log 内容，不出现 crash/ANR/资源趋势等越界入口。
