@@ -221,7 +221,7 @@
   - **验收**: 新用例在现有包名-only 实现上失败；搜索预期不依赖元数据尚未加载的猜测名称。
 - [X] T055 [US4] 接入渐进元数据、双字段搜索和 Session 清理于 `feature/apps/src/main/kotlin/com/sheen/adb/feature/apps/AppsModels.kt` 和 `feature/apps/src/main/kotlin/com/sheen/adb/feature/apps/AppsViewModel.kt`
   - **验收**: T054 和既有应用操作测试通过；元数据到达后 1 秒内更新匹配，包名始终正确，Session 变化清空名称、图标和搜索结果。
-- [ ] T056 [US4] 先写应用条目 presentation 失败测试，覆盖名称优先/包名 fallback、统一占位、同名包名、metadata 状态、超长/双向文本和图标 1 MiB 拒绝于 `feature/apps/src/test/kotlin/com/sheen/adb/feature/apps/AppsPresentationTest.kt`
+- [X] T056 [US4] 先写应用条目 presentation 失败测试，覆盖名称优先/包名 fallback、统一占位、同名包名、metadata 状态、超长/双向文本和图标 1 MiB 拒绝于 `feature/apps/src/test/kotlin/com/sheen/adb/feature/apps/AppsPresentationTest.kt`
   - **验收**: 目标测试因 icon renderer/presentation 缺失而失败；测试仅使用合成像素与包名。
 - [ ] T057 [US4] 实现受限图标 renderer 与应用列表展示于 `feature/apps/src/main/kotlin/com/sheen/adb/feature/apps/ApplicationIconRenderer.kt` 和 `feature/apps/src/main/kotlin/com/sheen/adb/feature/apps/AppsScreen.kt`
   - **验收**: T056 与 `:feature:apps:testDebugUnitTest` 通过；列表在缺失/损坏/超大图标时使用统一占位，同名始终显示包名，既有操作确认仍绑定当前 Session + packageName。
