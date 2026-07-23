@@ -188,7 +188,7 @@
   - **验收**: T044 与 US1/US2 ViewModel 回归通过；前台进入自动开始，离页/后台/取消停止，选择 pairing 条目进入 US1，选择 connect 条目仍需用户确认。
 - [X] T046 [US3] 先写发现列表展示策略失败测试，覆盖进度、空/受限原因、重复为零、未知关联、刷新/取消、过期目标和手动地址入口于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/DevicesDiscoveryPresentationTest.kt`
   - **验收**: 目标测试因 panel/presentation 缺失而失败；文案不承诺绕过 VPN、热点隔离或 ROM 策略。
-- [ ] T047 [US3] 实现 LAN discovery panel 并接入设备页于 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesDiscoveryPanel.kt` 和 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesScreen.kt`
+- [X] T047 [US3] 实现 LAN discovery panel 并接入设备页于 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesDiscoveryPanel.kt` 和 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesScreen.kt`
   - **验收**: T046 与所有 devices tests 通过；15 条结果下 UI 可操作，刷新/取消/手动输入可见，应用后台不继续扫描且不存在端口扫描入口。
 
 **Checkpoint**: US3 在受控网络中独立可测；没有任何未公布服务的主机收到主动探测。
