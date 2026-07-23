@@ -130,6 +130,7 @@ feature/logcat/
 
 - 本机 coordinator 继续由唯一 manager 持有，但公共接线分为独立契约与实现两步：先仅在 `AdbSessionManager.kt` 定义项目自有 `LocalPairingController`、状态流与默认 `UNSUPPORTED` 兼容入口，使 App/Feature 不需要强转 `DefaultAdbSessionManager` 或导入 internal 类型；再由 `LocalPairingCoordinator.kt` 与 `DefaultAdbSessionManager.kt` 实现唯一窗口、发现/提交复用和终态清理。该拆分保持每任务最多两个文件，并让既有 fake manager 在契约扩展后继续编译。
 - Feature 本机模式也拆为状态机与协调两步：先仅修改 `DevicesPairingModels.kt` 和 `DevicesPairingReducer.kt`，固定默认配对码、发现/通知/权限/OEM/离页 effect；再单独修改 `DevicesViewModel.kt`，把这些 effect 接到公共 `LocalPairingController`。这样 reducer RED/GREEN 与 coroutine manager flow 各自可验证，且不超过每任务两个文件。
+- App 装配在 UI 接线前增加独立 bridge 同步步骤：`LocalPairingAppBridge` 只根据既有公共 controller flow 幂等启停唯一 short service，不再次创建 window；随后 `SheenApp.kt` 与 `DevicesScreen.kt` 才接权限、系统设置和本机状态。这样保持单一 coordinator/window，并继续满足每任务最多两个文件。
 - `:core:adb` 的 `LocalPairingCoordinator` 持有唯一 attempt/window、5 秒发现状态、2 分钟单调时钟硬截止、service lost/Session change 终态和共用提交入口。Activity 可见时由 `:app` 启动一个非导出 `shortService`，5 秒内调用 `startForeground`；Service 只观察核心状态并翻译为 Android 通知，在成功、取消、配对服务消失、超时、Session 改变或 `onTimeout` 时停止并撤销通知。
 - Android 13+ 按需请求通知权限；拒绝、通知关闭、RemoteInput/OEM 不兼容均回退应用内同一输入状态机，不阻断配对。
 - 锁屏发布无 action 的隐私化通知。Service 仅在窗口活动期间动态注册非导出的 `ACTION_USER_PRESENT` 接收器，并在收到事件或前台恢复时重新查询 `KeyguardManager.isDeviceLocked`；确认解锁后才把同一通知替换为带 `RemoteInput` 的版本，停止时确定性注销接收器。提交使用显式、一次性、mutable PendingIntent；API 31+ 在 `Notification.Action.Builder.setAuthenticationRequired(true)` 上要求认证，并在 Service 接收端再次检查 `KeyguardManager`、session token、六位 ASCII 数字与截止时间。
