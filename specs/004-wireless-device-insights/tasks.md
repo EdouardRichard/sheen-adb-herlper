@@ -157,7 +157,7 @@
   - **验收**: 测试先因同步 API 缺失失败再转绿；既有活动 window 只启动一次 service，终态/无 window 只停止一次，不重复创建 controller window，进程重建不恢复旧窗口。
 - [X] T039B [US2] 增加本机终态清理回归并修正 reducer 于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/DevicesPairingReducerTest.kt` 和 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesPairingReducer.kt`
   - **验收**: 测试先证明本机成功/失败/取消/过期/不支持仍残留活动 window，再转绿；所有终态原子停止本机发现、关闭通知窗口且不会被随后普通离页覆盖。
-- [ ] T039 [US2] 将平台 bridge、系统设置入口、通知授权结果和本机状态接入 UI 于 `app/src/main/kotlin/com/sheen/adbhelper/SheenApp.kt` 和 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesScreen.kt`
+- [X] T039 [US2] 将平台 bridge、系统设置入口、通知授权结果和本机状态接入 UI 于 `app/src/main/kotlin/com/sheen/adbhelper/SheenApp.kt` 和 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesScreen.kt`
   - **验收**: T037、`:app:testDebugUnitTest` 与 `:feature:devices:testDebugUnitTest` 通过；通知拒绝/关闭/OEM 不兼容仍能从应用内提交，锁屏 UI/通知不泄漏敏感值，解锁后无需重启窗口即可继续输入，既有手动 localhost 入口保留。
 
 **Checkpoint**: US2 可在单机上独立验收；普通 LAN、文件和诊断不会借 short service 延长后台生命周期。
