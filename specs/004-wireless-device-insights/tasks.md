@@ -254,7 +254,7 @@
   - **验收**: T062 的纯关联测试通过；只有同 Session/代次且归一化 UID 唯一匹配时为 VERIFIED，共享 UID 为 MULTIPLE，缺失/跨用户/PID 复用/进程退出为 UNKNOWN，禁止名称前缀猜测。
 - [X] T063A [US5] 暴露并接入当前 Session 的 structured Logcat 与进程关联快照于 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbSessionManager.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
   - **验收**: T060、T062、现有 streamLogcat/listProcesses 与全部 core tests 通过；离页/停止/取消/断开/Session change 不交付旧记录，解析失败明确降级且 raw copy/export 语义保持。
-- [ ] T064 [P] [US5] 先写进程筛选 Feature 失败测试，覆盖完整/部分 PID、进程名、应用、AND 语义、空/退出/不支持、UNKNOWN/MULTIPLE 和 Session 清理于 `feature/processes/src/test/kotlin/com/sheen/adb/feature/processes/ProcessesAnalysisPolicyTest.kt`
+- [X] T064 [P] [US5] 先写进程筛选 Feature 失败测试，覆盖完整/部分 PID、进程名、应用、AND 语义、空/退出/不支持、UNKNOWN/MULTIPLE 和 Session 清理于 `feature/processes/src/test/kotlin/com/sheen/adb/feature/processes/ProcessesAnalysisPolicyTest.kt`
   - **验收**: 目标测试在现有 name/PID-only 实现上失败；只读快照不产生 kill/force-stop effect。
 - [ ] T065 [US5] 实现进程分析状态、筛选和 Compose 展示于 `feature/processes/src/main/kotlin/com/sheen/adb/feature/processes/ProcessesViewModel.kt` 和 `feature/processes/src/main/kotlin/com/sheen/adb/feature/processes/ProcessesScreen.kt`
   - **验收**: T064 与 `:feature:processes:testDebugUnitTest` 通过；结果区分 empty/exited/unsupported/cancelled/disconnected，筛选 1 秒内更新且没有进程控制入口。
