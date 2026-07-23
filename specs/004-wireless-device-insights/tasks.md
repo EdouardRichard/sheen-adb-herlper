@@ -98,13 +98,13 @@
   - **验收**: 目标测试因 reducer/model 缺失而失败；每个规格状态均有独立断言，已有 Session 未确认时不得产生 connect effect。
 - [X] T024 [US1] 实现设备配对 UI 状态与 reducer 于 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesPairingModels.kt` 和 `feature/devices/src/main/kotlin/com/sheen/adb/feature/devices/DevicesPairingReducer.kt`
   - **验收**: T023 通过；状态不可保存 QR/secret 到 SavedState，错误区分 unsupported/expired/invalid/cancelled，code 提交 effect 使用可清零字符容器。
-- [ ] T024A [US1] 先写 manager-owned QR orchestration 失败测试，覆盖核心 material 失效、resolved observation 精确提交、取消/超时/旧 attempt、已有 Session 冲突和成功后不自动连接于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/QrPairingSessionManagerTest.kt`
+- [X] T024A [US1] 先写 manager-owned QR orchestration 失败测试，覆盖核心 material 失效、resolved observation 精确提交、取消/超时/旧 attempt、已有 Session 冲突和成功后不自动连接于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/QrPairingSessionManagerTest.kt`
   - **验收**: 目标测试因公共 QR material/manager orchestration 契约缺失而编译失败；fake 只记录调用类别与长度，不保留 payload、service name、endpoint 或 secret 原文。
-- [ ] T024B [US1] 建立核心可失效的只读 QR material 公共边界于 `core/adb/src/main/kotlin/com/sheen/adb/core/PairingModels.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/pairing/QrPairingCoordinator.kt`
+- [X] T024B [US1] 建立核心可失效的只读 QR material 公共边界于 `core/adb/src/main/kotlin/com/sheen/adb/core/PairingModels.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/pairing/QrPairingCoordinator.kt`
   - **验收**: 既有 T017 通过；feature 可读取 attemptId、deadline 与当前 payload，但不能读取 password/service instance，终态后同一 material 引用返回空 payload，公开类型不暴露 internal/Kadb/Socket。
-- [ ] T024C [US1] 扩展 manager-owned QR 创建、提交 observation 与取消契约于 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbSessionManager.kt`
+- [X] T024C [US1] 扩展 manager-owned QR 创建、提交 observation 与取消契约于 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbSessionManager.kt`
   - **验收**: T024A 从缺少 API 的编译失败推进为行为失败；默认兼容实现返回 `PairingUnsupported` 且不保留 material，既有 fake manager 无需实现新方法即可编译。
-- [ ] T024D [US1] 在唯一 manager 中持有 QR coordinator 并将已验证 observation 接入共用配对 path 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
+- [X] T024D [US1] 在唯一 manager 中持有 QR coordinator 并将已验证 observation 接入共用配对 path 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
   - **验收**: T024A、T017、T019 和全部 core manager 回归通过；只有当前 attempt 的精确 resolved pairing observation 可触发 Kadb，所有终态/close 清理 material，成功只授权且保持无连接状态，已有 Session 保持不变。
 - [ ] T025 [US1] 先写 DevicesViewModel 配对流失败测试，覆盖 manager flow 收集、generation 丢弃、页面离开清理、重试和用户确认断开旧 Session 于 `feature/devices/src/test/kotlin/com/sheen/adb/feature/devices/DevicesPairingViewModelTest.kt`
   - **验收**: 目标测试因 ViewModel 未接入新 reducer/manager 而失败；fake manager/repository 不使用真实端点或包名。
