@@ -143,7 +143,7 @@
   - **验收**: 目标测试在 Service/Manifest 尚未实现时按行为断言失败；测试使用 fake Keyguard/notification facade，不依赖真实通知栏或 Activity 引用。
 - [X] T034 [US2] 声明通知/前台服务权限与唯一非导出 shortService，并实现 Android Service/RemoteInput/解锁事件适配于 `app/src/main/AndroidManifest.xml` 和 `app/src/main/kotlin/com/sheen/adbhelper/localpairing/LocalPairingForegroundService.kt`
   - **验收**: T033 通过；merged Manifest 在 T002 两项 NSD 权限之外仅新增 `POST_NOTIFICATIONS`、`FOREGROUND_SERVICE` 和一个 `exported=false`、`shortService` 组件；Service 为 `START_NOT_STICKY`，只观察 core coordinator，窗口结束后注销 receiver、撤销通知并停止自身。
-- [ ] T035 [P] [US2] 先写 App 装配失败测试，覆盖 application Context、单 core coordinator、通知被清除、权限拒绝回调和进程重建不恢复旧窗口于 `app/src/test/kotlin/com/sheen/adbhelper/localpairing/LocalPairingAppBridgeTest.kt`
+- [X] T035 [P] [US2] 先写 App 装配失败测试，覆盖 application Context、单 core coordinator、通知被清除、权限拒绝回调和进程重建不恢复旧窗口于 `app/src/test/kotlin/com/sheen/adbhelper/localpairing/LocalPairingAppBridgeTest.kt`
   - **验收**: 目标测试因 bridge/装配缺失而失败；测试证明 App 层只翻译平台事件，不复制 deadline/token/配对业务状态。
 - [ ] T036 [US2] 装配本机配对平台 bridge 与应用级生命周期于 `app/src/main/kotlin/com/sheen/adbhelper/localpairing/LocalPairingAppBridge.kt` 和 `app/src/main/kotlin/com/sheen/adbhelper/SheenApplication.kt`
   - **验收**: T035 通过；只持有 application Context，同一窗口只映射一个 core coordinator，进程结束不恢复旧窗口，通知权限拒绝不阻塞应用内流。
