@@ -242,7 +242,7 @@
   - **验收**: 目标测试因 parser/filter 缺失而失败；合成日志不含真实应用/设备信息，未知格式保留 raw text 且不伪造 PID/level/tag。
 - [X] T059 [US5] 实现 structured Logcat parser 与组合 filter 于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/diagnostics/StructuredLogcatParser.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/diagnostics/DiagnosticFilter.kt`
   - **验收**: T058 通过；所有启用条件取交集，UNKNOWN/MULTIPLE association 不作为唯一应用命中，过滤不扩大原始缓冲。
-- [ ] T060 [P] [US5] 先写应用 UID 命令与 Session 集成失败测试，覆盖 `pm list packages -3 -U --user` 输出、UID 缺失降级、当前用户范围和既有应用操作回归于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationCapabilitiesTest.kt` 和 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationSessionManagerTest.kt`
+- [X] T060 [P] [US5] 先写应用 UID 命令与 Session 集成失败测试，覆盖 `pm list packages -3 -U --user` 输出、UID 缺失降级、当前用户范围和既有应用操作回归于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationCapabilitiesTest.kt` 和 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ApplicationSessionManagerTest.kt`
   - **验收**: 新断言因命令尚未请求/解析 UID 而失败，现有 fixture 更新为合成 UID 且不含真实包名；测试继续证明只枚举当前用户第三方应用并保持 force-stop/enable/disable 语义。
 - [ ] T061 [US5] 扩展应用清单 UID 命令/解析与项目自有关联模型于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/ApplicationCapabilities.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbModels.kt`
   - **验收**: T060 中命令、解析和 UID 归一化断言通过，既有应用管理测试同步保持当前用户第三方范围；UID 缺失显式保留 unknown，不记录包名上下文且不新增进程终止能力。
