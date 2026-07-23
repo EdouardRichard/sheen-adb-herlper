@@ -219,7 +219,7 @@
   - **验收**: T052 与现有 `ApplicationSessionManagerTest` 通过；包名首帧可用，单包失败不隐藏其他条目，断开/取消/切换后 update 作废。
 - [X] T054 [US4] 先扩充 Apps 策略失败测试，覆盖 displayName/packageName OR 搜索、大小写/中文/数字/点/下划线、enabled filter 交集、同名包区分、占位和 Session 清理于 `feature/apps/src/test/kotlin/com/sheen/adb/feature/apps/AppsPolicyTest.kt`
   - **验收**: 新用例在现有包名-only 实现上失败；搜索预期不依赖元数据尚未加载的猜测名称。
-- [ ] T055 [US4] 接入渐进元数据、双字段搜索和 Session 清理于 `feature/apps/src/main/kotlin/com/sheen/adb/feature/apps/AppsModels.kt` 和 `feature/apps/src/main/kotlin/com/sheen/adb/feature/apps/AppsViewModel.kt`
+- [X] T055 [US4] 接入渐进元数据、双字段搜索和 Session 清理于 `feature/apps/src/main/kotlin/com/sheen/adb/feature/apps/AppsModels.kt` 和 `feature/apps/src/main/kotlin/com/sheen/adb/feature/apps/AppsViewModel.kt`
   - **验收**: T054 和既有应用操作测试通过；元数据到达后 1 秒内更新匹配，包名始终正确，Session 变化清空名称、图标和搜索结果。
 - [ ] T056 [US4] 先写应用条目 presentation 失败测试，覆盖名称优先/包名 fallback、统一占位、同名包名、metadata 状态、超长/双向文本和图标 1 MiB 拒绝于 `feature/apps/src/test/kotlin/com/sheen/adb/feature/apps/AppsPresentationTest.kt`
   - **验收**: 目标测试因 icon renderer/presentation 缺失而失败；测试仅使用合成像素与包名。
