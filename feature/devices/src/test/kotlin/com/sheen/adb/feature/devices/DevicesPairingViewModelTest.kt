@@ -280,7 +280,7 @@ class DevicesPairingViewModelTest {
             AdbSessionManager::class.java.classLoader,
             arrayOf(AdbSessionManager::class.java),
         ) { _, method, args ->
-            when (method.name) {
+            when (method.name.substringBefore('-')) {
                 "getConnectionState" -> connectionState
                 "getDiagnosticEvents" -> diagnostics
                 "createQrPairingAttempt" -> {
