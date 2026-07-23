@@ -129,7 +129,7 @@
 
 ### Tests first
 
-- [ ] T029 [P] [US2] 先写核心本机通知决策失败测试，覆盖锁屏无 action、解锁后可输入、token/deadline、六位 ASCII 校验、权限/OEM 降级和所有停止条件于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/LocalPairingNotificationPolicyTest.kt`
+- [X] T029 [P] [US2] 先写核心本机通知决策失败测试，覆盖锁屏无 action、解锁后可输入、token/deadline、六位 ASCII 校验、权限/OEM 降级和所有停止条件于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/LocalPairingNotificationPolicyTest.kt`
   - **验收**: 目标测试因项目自有策略缺失而失败；断言锁屏前既不能输入也不能提交，输出只含平台无关决策且不含 code/endpoint/device identity。
 - [ ] T030 [US2] 实现平台无关的本机通知决策与窗口值对象于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/pairing/LocalPairingNotificationPolicy.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/PairingModels.kt`
   - **验收**: T029 通过；只有 unlocked + valid token + live endpoint + before deadline 才产生 input-ready 决策，拒绝路径明确指向应用内输入和原生通知样式建议，不引用 Android 通知类型。
