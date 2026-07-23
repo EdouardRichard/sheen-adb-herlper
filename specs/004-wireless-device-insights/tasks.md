@@ -264,7 +264,7 @@
   - **验收**: T066、既有 `LogcatBufferTest` 和导出回归通过；过滤变化不重读无界历史，停止/离页/Session change 清除关联并拒绝旧流。
 - [X] T068 [US5] 先写 Logcat presentation 失败测试，覆盖 level/tag/keyword/PID/process/app 控件、组合条件摘要、空/截断/解析失败/停止状态和复制/导出确认于 `feature/logcat/src/test/kotlin/com/sheen/adb/feature/logcat/LogcatPresentationTest.kt`
   - **验收**: 目标测试因新展示策略缺失而失败；文案不包含真实 package/log 内容，不出现 crash/ANR/资源趋势等越界入口。
-- [ ] T069 [US5] 实现 Logcat 基础分析 Compose UI 于 `feature/logcat/src/main/kotlin/com/sheen/adb/feature/logcat/LogcatScreen.kt`
+- [X] T069 [US5] 实现 Logcat 基础分析 Compose UI 于 `feature/logcat/src/main/kotlin/com/sheen/adb/feature/logcat/LogcatScreen.kt`
   - **验收**: T068 与全部 logcat tests 通过；各筛选可单独/组合清除，1 秒内更新有界结果，复制/SAF 导出仍需用户明确动作且只使用当前可见内容。
 
 **Checkpoint**: US5 可独立验收；维持前台采集、只读进程、有界内存和现有导出边界。
