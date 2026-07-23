@@ -16,7 +16,9 @@ import com.sheen.adb.core.WirelessServiceStatus
 import com.sheen.adb.core.WirelessServiceType
 import java.util.concurrent.CancellationException
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.runBlocking
 import org.testng.Assert.assertEquals
@@ -211,6 +213,28 @@ class QrPairingSessionManagerTest {
         assertTrue(factory.calls.isEmpty())
     }
 
+    @Test
+    fun `cancellation wins over a later protocol success and invalidates material once`() = runBlocking {
+        val factory = RecordingFactory(pairBehavior = PairBehavior.BLOCK_UNTIL_RELEASE)
+        val manager = qrManager(factory)
+        val attemptId = PairingAttemptId.of("manager-attempt-cancel-race")
+        val material = (
+            manager.createQrPairingAttempt(attemptId) as AdbOperationResult.Success<QrPairingMaterial>
+        ).value
+        val observation = resolvedPairingObservation(serviceNameFrom(material))
+        val pairing = async { manager.pairQrObservation(attemptId, observation) }
+        factory.pairStarted.await()
+
+        val cancelled = manager.cancelQrPairing(attemptId)
+        factory.pairRelease.complete(Unit)
+        val pairingResult = pairing.await()
+
+        assertTrue(cancelled is AdbOperationResult.Success<*>)
+        assertSame(pairingResult, AdbOperationResult.Cancelled)
+        assertEquals(material.payload, null)
+        assertEquals(factory.calls.single().length, STANDARD_QR_PASSWORD_LENGTH)
+    }
+
     private fun qrManager(factory: RecordingFactory): DefaultAdbSessionManager = DefaultAdbSessionManager(
         clientFactory = factory,
         ioDispatcher = Dispatchers.Unconfined,
@@ -237,6 +261,7 @@ class QrPairingSessionManagerTest {
         RETURN,
         WAIT_FOREVER,
         CANCEL,
+        BLOCK_UNTIL_RELEASE,
     }
 
     private enum class CredentialShape {
@@ -255,6 +280,8 @@ class QrPairingSessionManagerTest {
         private val pairBehavior: PairBehavior = PairBehavior.RETURN,
     ) : AdbProtocolClientFactory {
         val calls = mutableListOf<PairCall>()
+        val pairStarted = CompletableDeferred<Unit>()
+        val pairRelease = CompletableDeferred<Unit>()
         var openCalls = 0
             private set
 
@@ -274,10 +301,12 @@ class QrPairingSessionManagerTest {
                 },
                 length = pairingCode.size,
             )
+            pairStarted.complete(Unit)
             when (pairBehavior) {
                 PairBehavior.RETURN -> Unit
                 PairBehavior.WAIT_FOREVER -> awaitCancellation()
                 PairBehavior.CANCEL -> throw CancellationException("synthetic cancellation")
+                PairBehavior.BLOCK_UNTIL_RELEASE -> pairRelease.await()
             }
         }
 
