@@ -151,6 +151,7 @@ feature/logcat/
 - `:core:adb` 把 threadtime 行解析为时间、PID、TID、级别、标签、消息和原始文本；无法解析的行保留为 structured `UNPARSED`，不丢失但不伪造身份。
 - 应用 UID 接入拆为两个实施边界：先仅在 `ApplicationCapabilities.kt` 与 `AdbModels.kt` 增加 `pm list packages -3 -U --user` 的可选 UID 解析、规范化模型和兼容默认值；随后修改 `DefaultAdbSessionManager.kt`，把同一次当前用户第三方应用查询得到的 UID 写入 Session 快照，并同步修正依赖该命令的 metadata manager 合成夹具。这样既有应用操作与 metadata flow 仍消费同一快照，又保持每任务最多修改两个文件。
 - 进程快照增加应用关联结果 `VERIFIED / MULTIPLE / UNKNOWN`。应用清单解析 Android UID 并归一化为 `(userId, appId)`；进程 UID 同样归一化后，只在当前 Session、相同快照代次、同 userId/appId 且候选唯一时建立关联。共享 UID、多用户冲突、PID 复用、进程退出、多进程或字段缺失明确标记未知/多候选，不以 PID 或进程名前缀猜测。
+- 诊断关联也拆为公共模型/resolver 与 manager 接线两个实施边界：`AdbModels.kt` 与 `ProcessAssociation.kt` 先定义项目自有 structured Logcat、进程分析、generation 和关联值，并完成纯函数关联；随后 `AdbSessionManager.kt` 与 `DefaultAdbSessionManager.kt` 才暴露并实现当前 Session 的分析快照与结构化流。这样 public contract 不落入 internal 包，且每任务最多修改两个文件。
 - Logcat 的 level/tag/keyword/PID/process/application 与进程的 PID/name/application 均按交集过滤。继续使用 10,000 行或 4 MiB 原始内存边界与最新 100 条可见窗口；不做崩溃/ANR 识别、资源趋势或后台采集。
 
 ## Verification Strategy

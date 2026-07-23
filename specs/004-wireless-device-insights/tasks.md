@@ -250,8 +250,10 @@
   - **验收**: T060 的 Session UID 断言、metadata flow 与既有 force-stop/enable/disable 回归通过；只绑定同次当前用户第三方应用查询，UID 缺失保持 null，Session 切换不复用旧 UID。
 - [ ] T062 [US5] 先写进程关联与 manager 诊断集成失败测试，覆盖 Android UID 归一化为 `(userId,appId)`、Session/snapshot generation、PID 复用、共享 UID、多用户、多进程、字段缺失、进程退出、VERIFIED/MULTIPLE/UNKNOWN、structured stream、停止/取消/断开/Session change 和旧结果拒绝于 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/ProcessAssociationTest.kt` 和 `core/adb/src/test/kotlin/com/sheen/adb/core/internal/DiagnosticsSessionManagerTest.kt`
   - **验收**: 目标测试因 association/manager 集成缺失而失败；任何共享 UID、多用户冲突或不确定关系均为 MULTIPLE/UNKNOWN，禁止按 PID/进程名前缀猜测，现有 raw copy/export 语义保持可验证。
-- [ ] T063 [US5] 实现可靠进程关联并接入 structured Logcat/关联快照于 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/diagnostics/ProcessAssociation.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
-  - **验收**: T060、T062、现有 streamLogcat/listProcesses 与全部 core tests 通过；只有同 Session/代次且归一化 UID 唯一匹配时为 VERIFIED，离页/停止/断开/Session change 不交付旧记录，解析错误明确降级。
+- [ ] T063 [US5] 实现项目自有诊断模型与可靠进程关联 resolver 于 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbModels.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/diagnostics/ProcessAssociation.kt`
+  - **验收**: T062 的纯关联测试通过；只有同 Session/代次且归一化 UID 唯一匹配时为 VERIFIED，共享 UID 为 MULTIPLE，缺失/跨用户/PID 复用/进程退出为 UNKNOWN，禁止名称前缀猜测。
+- [ ] T063A [US5] 暴露并接入当前 Session 的 structured Logcat 与进程关联快照于 `core/adb/src/main/kotlin/com/sheen/adb/core/AdbSessionManager.kt` 和 `core/adb/src/main/kotlin/com/sheen/adb/core/internal/DefaultAdbSessionManager.kt`
+  - **验收**: T060、T062、现有 streamLogcat/listProcesses 与全部 core tests 通过；离页/停止/取消/断开/Session change 不交付旧记录，解析失败明确降级且 raw copy/export 语义保持。
 - [ ] T064 [P] [US5] 先写进程筛选 Feature 失败测试，覆盖完整/部分 PID、进程名、应用、AND 语义、空/退出/不支持、UNKNOWN/MULTIPLE 和 Session 清理于 `feature/processes/src/test/kotlin/com/sheen/adb/feature/processes/ProcessesAnalysisPolicyTest.kt`
   - **验收**: 目标测试在现有 name/PID-only 实现上失败；只读快照不产生 kill/force-stop effect。
 - [ ] T065 [US5] 实现进程分析状态、筛选和 Compose 展示于 `feature/processes/src/main/kotlin/com/sheen/adb/feature/processes/ProcessesViewModel.kt` 和 `feature/processes/src/main/kotlin/com/sheen/adb/feature/processes/ProcessesScreen.kt`
